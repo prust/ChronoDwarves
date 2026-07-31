@@ -2,11 +2,11 @@
 
 **Defend your kin against the giants with time-travel: interact with past runs to perform combo attacks.**
 
-But be careful to avoid letting one of your past selves see you, or you will rip the fabric of space/time.
+But be careful to avoid letting one of your past selves see you or you will rip the fabric of space/time.
 
 The WIP can be played online at https://prust.github.io/ChronoDwarves/.
 
-Note that the graphics are placeholders (our pixel artist won't be able to start until Saturday afternoon).
+**Note:** the graphics are placeholders (our pixel artist won't be able to start until Saturday afternoon).
 
 Acknowlegments:
 
@@ -14,9 +14,9 @@ A huge thank-you to [ebitengine](https://ebitengine.org/) and these excellent li
 
 # How to play locally
 
-In addition to playing the game online at https://prust.github.io/ChronoDwarves/, you can install and run it locally.
+In addition to playing the game online at https://prust.github.io/ChronoDwarves/, you can install and run it locally (it uses much less CPU when run locally).
 
-It uses about half the CPU when it's run locally. Here are the steps:
+Here are the steps:
 
 - Download & install Go: https://go.dev/dl/
 - Install go modules: `go mod tidy`
