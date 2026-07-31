@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"embed"
+	"image/color"
 	"io/fs"
 	"log"
 	"math"
@@ -13,6 +14,7 @@ import (
 	"github.com/hajimehoshi/ebiten/v2/audio"
 	"github.com/hajimehoshi/ebiten/v2/audio/wav"
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
+	"github.com/hajimehoshi/ebiten/v2/vector"
 
 	input "github.com/quasilyte/ebitengine-input"
 	"github.com/setanarut/kamera/v2"
@@ -29,17 +31,26 @@ const (
 	action_right
 	action_up
 	action_down
+	action_cam_reset
+	action_hitbox
 	sample_rate  = 48000
 	anim_rate    = time.Second / 8 // 8fps pixel art animation (looping 3-frame walk cycles)
 	player_speed = 4
+	window_w     = 1024
+	window_h     = 768
+	screen_w     = window_w / 4
+	screen_h     = window_h / 4
 )
 
 var (
-	cam       *kamera.Camera
-	game_map  *dngn.Layout
-	wall_img  *ebiten.Image
-	door_img  *ebiten.Image
-	floor_img *ebiten.Image
+	cam           *kamera.Camera
+	game_map      *dngn.Layout
+	wall_img      *ebiten.Image
+	door_img      *ebiten.Image
+	floor_img     *ebiten.Image
+	is_cam_reset  bool
+	show_hitboxes bool
+	red           color.RGBA
 )
 
 type Game struct {
@@ -53,6 +64,7 @@ type Game struct {
 	audio_context     *audio.Context
 	player_walk_sound *audio.Player
 	space             *resolv.Space
+	wall_rects        []*resolv.ConvexPolygon
 }
 
 type Player struct {
@@ -75,6 +87,8 @@ func (p *Player) NormalizeVelocity() {
 
 func (g *Game) Update() error {
 	g.input_system.Update()
+	is_cam_reset = g.player_input.ActionIsPressed(action_cam_reset)
+	show_hitboxes = g.player_input.ActionIsPressed(action_hitbox)
 	was_walking := g.player.dx != 0 || g.player.dy != 0
 
 	if g.player_input.ActionIsPressed(action_left) {
@@ -147,7 +161,11 @@ func (g *Game) Update() error {
 		g.player_anim[g.player_dir].Update()
 	}
 
-	cam.LookAt(float64(g.player.x), float64(g.player.y))
+	if is_cam_reset {
+		cam.SetTopLeft(0, 0)
+	} else {
+		cam.LookAt(float64(g.player.x), float64(g.player.y))
+	}
 	return nil
 }
 
@@ -182,6 +200,13 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	op.GeoM.Reset()
 	op.GeoM.Translate(float64(g.player.x), float64(g.player.y))
 	cam.Draw(g.player_anim[g.player_dir].Frame(), op, screen)
+
+	if show_hitboxes {
+		for _, wall_rect := range g.wall_rects {
+			drawHitbox(wall_rect, cam, screen)
+		}
+		drawHitbox(g.player.rect, cam, screen)
+	}
 }
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (screenWidth, screenHeight int) {
@@ -189,12 +214,14 @@ func (g *Game) Layout(outsideWidth, outsideHeight int) (screenWidth, screenHeigh
 }
 
 func main() {
-	ebiten.SetWindowSize(1280, 960)
+	red = color.RGBA{R: 255, G: 0, B: 0, A: 255}
+
+	ebiten.SetWindowSize(window_w, window_h)
 	ebiten.SetWindowTitle("Ebitengine Template")
 
 	g := &Game{
-		screen_w: 640,
-		screen_h: 480,
+		screen_w: screen_w,
+		screen_h: screen_h,
 	}
 
 	// generate map
@@ -223,8 +250,10 @@ func main() {
 	// trying a 32x32 "cell" size (for now) for performant collision checks
 	g.space = resolv.NewSpace(100*16, 100*16, 32, 32)
 	wall_select := game_map.Select().FilterByRune('x')
+	g.wall_rects = make([]*resolv.ConvexPolygon, 0, len(wall_select.Cells))
 	for cell := range wall_select.Cells {
-		wall_rect := resolv.NewRectangle(float64(cell.X)*16, float64(cell.Y)*16, 16, 16)
+		wall_rect := resolv.NewRectangleFromTopLeft(float64(cell.X)*16, float64(cell.Y)*16, 16, 16)
+		g.wall_rects = append(g.wall_rects, wall_rect)
 		g.space.Add(wall_rect)
 	}
 
@@ -237,10 +266,12 @@ func main() {
 	// initialize input system
 	g.input_system.Init(input.SystemConfig{DevicesEnabled: input.AnyDevice})
 	keymap := input.Keymap{
-		action_left:  {input.KeyLeft, input.KeyA},
-		action_right: {input.KeyRight, input.KeyD},
-		action_up:    {input.KeyUp, input.KeyW},
-		action_down:  {input.KeyDown, input.KeyS},
+		action_left:      {input.KeyLeft, input.KeyA},
+		action_right:     {input.KeyRight, input.KeyD},
+		action_up:        {input.KeyUp, input.KeyW},
+		action_down:      {input.KeyDown, input.KeyS},
+		action_cam_reset: {input.KeyC},
+		action_hitbox:    {input.KeyH},
 	}
 	g.player_input = g.input_system.NewHandler(0, keymap)
 
@@ -265,7 +296,8 @@ func main() {
 		x: start_x * 16,
 		y: start_y * 16,
 	}
-	g.player.rect = resolv.NewRectangle(g.player.x, g.player.y, 16, 32)
+	// player hitbox is smaller than the frame
+	g.player.rect = resolv.NewRectangleFromTopLeft(g.player.x+2, g.player.y+11, 11, 19)
 	g.space.Add(g.player.rect)
 
 	g.audio_context = audio.NewContext(sample_rate)
@@ -283,7 +315,7 @@ func main() {
 	g.player_anim[2] = ganim8.New(character_img, g32.Frames("1-3", 3), anim_rate)
 	g.player_anim[3] = ganim8.New(character_img, g32.Frames("1-3", 4), anim_rate)
 
-	cam = kamera.NewCamera(float64(g.player.x), float64(g.screen_h/2), float64(g.screen_w), float64(g.screen_h))
+	cam = kamera.NewCamera(g.player.x, g.player.y, float64(g.screen_w), float64(g.screen_h))
 	cam.ShakeEnabled = true
 	cam.SmoothType = kamera.SmoothDamp
 	cam.SmoothOptions.SmoothDampTimeX = 0.15
@@ -315,6 +347,34 @@ func isRectangleOverlap(x1 float64, y1 float64, x2 float64, y2 float64, x3 float
 		return false
 	}
 	return true
+}
+
+// drawRedRect() is for debugging purposes (takes world coordinates, translates to screen coords before drawing)
+func drawRedRect(x float64, y float64, x2 float64, y2 float64, cam *kamera.Camera, screen *ebiten.Image) {
+	drawRedLine(x, y, x2, y, cam, screen)
+	drawRedLine(x2, y, x2, y2, cam, screen)
+	drawRedLine(x2, y2, x, y2, cam, screen)
+	drawRedLine(x, y2, x, y, cam, screen)
+}
+
+func drawHitbox(box *resolv.ConvexPolygon, cam *kamera.Camera, screen *ebiten.Image) {
+	x := box.ShapeBase.Position().X
+	y := box.ShapeBase.Position().Y
+	var prev_vec resolv.Vector
+	for ix, vec := range box.Points {
+		if ix > 0 {
+			drawRedLine(x+prev_vec.X, y+prev_vec.Y, x+vec.X, y+vec.Y, cam, screen)
+		}
+		prev_vec = vec
+	}
+	vec := box.Points[0]
+	drawRedLine(x+prev_vec.X, y+prev_vec.Y, x+vec.X, y+vec.Y, cam, screen)
+}
+
+func drawRedLine(x float64, y float64, x2 float64, y2 float64, cam *kamera.Camera, screen *ebiten.Image) {
+	x, y = cam.ApplyCameraTransformToPoint(x, y)
+	x2, y2 = cam.ApplyCameraTransformToPoint(x2, y2)
+	vector.StrokeLine(screen, float32(x), float32(y), float32(x2), float32(y2), 1, red, false)
 }
 
 func check(err error) {
