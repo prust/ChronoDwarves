@@ -40,6 +40,9 @@ const (
 	sample_rate  = 48000
 	anim_rate    = time.Second / 8 // 8fps pixel art animation (looping 3-frame walk cycles)
 	player_speed = 4
+	player_w     = 16
+	player_h     = 32
+	grid_size    = 16
 	window_w     = 1024
 	window_h     = 768
 	screen_w     = window_w / 4
@@ -117,12 +120,12 @@ func (g *Game) Update() error {
 	was_walking := g.player.dx != 0 || g.player.dy != 0
 	if g.player_input.ActionIsJustPressed(action_time_travel) {
 		tick = 0
-		g.player.x = g.player.start_x * 16
-		g.player.y = g.player.start_y * 16
+		g.player.x = g.player.start_x * grid_size
+		g.player.y = g.player.start_y * grid_size
 
 		// the "position" in resolv is the *center* of the player, not the top-left
 		// so we need to compensate
-		g.player.rect.SetPosition(g.player.x+(16/2), g.player.y+(32/2))
+		g.player.rect.SetPosition(g.player.x+(player_w/2), g.player.y+(player_h/2))
 		has_time_traveled = true
 	}
 
@@ -258,9 +261,9 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	op := &ebiten.DrawImageOptions{}
 	for cell := range map_select.Cells {
 		// cull (only draw what's actually on-screen to avoid 100% CPU usage)
-		if isRectangleOverlap(x1, y1, x2, y2, float64(cell.X*16), float64(cell.Y*16), float64(cell.X*16+16), float64(cell.Y*16+16)) {
+		if isRectangleOverlap(x1, y1, x2, y2, float64(cell.X*grid_size), float64(cell.Y*grid_size), float64(cell.X*grid_size+grid_size), float64(cell.Y*grid_size+grid_size)) {
 			op.GeoM.Reset()
-			op.GeoM.Translate(float64(cell.X*16), float64(cell.Y*16))
+			op.GeoM.Translate(float64(cell.X*grid_size), float64(cell.Y*grid_size))
 			// smooth anti-aliasing (and so ebitengine batches calls due to identical Filter param)
 			// op.Filter = ebiten.FilterLinear
 
@@ -322,12 +325,12 @@ func main() {
 	}
 
 	// create resolv (collision detection) rectangles for walls in the grid
-	// trying a 32x32 "cell" size (for now) for performant collision checks
-	g.space = resolv.NewSpace(100*16, 100*16, 32, 32)
+	// trying a 4x "cell" size (double grid width & double grid height) for performant collision checks
+	g.space = resolv.NewSpace(100*grid_size, 100*grid_size, grid_size*2, grid_size*2)
 	wall_select := game_map.Select().FilterByRune('x')
 	g.wall_rects = make([]*resolv.ConvexPolygon, 0, len(wall_select.Cells))
 	for cell := range wall_select.Cells {
-		wall_rect := resolv.NewRectangleFromTopLeft(float64(cell.X)*16, float64(cell.Y)*16, 16, 16)
+		wall_rect := resolv.NewRectangleFromTopLeft(float64(cell.X)*grid_size, float64(cell.Y)*grid_size, grid_size, grid_size)
 		g.wall_rects = append(g.wall_rects, wall_rect)
 		g.space.Add(wall_rect)
 	}
@@ -367,8 +370,8 @@ func main() {
 		panic("Unable to find an empty pair of cells to spawn player after 1000 tries")
 	}
 
-	g.player.x = g.player.start_x * 16
-	g.player.y = g.player.start_y * 16
+	g.player.x = g.player.start_x * grid_size
+	g.player.y = g.player.start_y * grid_size
 
 	// player hitbox is smaller than the frame
 	g.player.rect = resolv.NewRectangleFromTopLeft(g.player.x+2, g.player.y+11, 11, 19)
@@ -382,8 +385,8 @@ func main() {
 	g.player.walk_sound, err = g.audio_context.NewPlayerF32(loop_walk)
 	check(err)
 
-	// 16x32 frames, 3 frame columns and 4 frame rows
-	g32 := ganim8.NewGrid(16, 32, 16*3, 32*4)
+	// 3 frame columns and 4 frame rows
+	g32 := ganim8.NewGrid(player_w, player_h, player_w*3, player_h*4)
 	g.player_anim[0] = ganim8.New(character_img, g32.Frames("1-3", 1), anim_rate)
 	g.player_anim[1] = ganim8.New(character_img, g32.Frames("1-3", 2), anim_rate)
 	g.player_anim[2] = ganim8.New(character_img, g32.Frames("1-3", 3), anim_rate)
