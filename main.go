@@ -35,6 +35,7 @@ const (
 	// misc non-history actions
 	action_cam_reset
 	action_hitbox
+	action_time_travel
 
 	sample_rate  = 48000
 	anim_rate    = time.Second / 8 // 8fps pixel art animation (looping 3-frame walk cycles)
@@ -49,14 +50,15 @@ var hist_actions = [4]input.Action{action_left, action_right, action_up, action_
 
 var red = color.RGBA{R: 255, G: 0, B: 0, A: 255}
 var (
-	cam           *kamera.Camera
-	game_map      *dngn.Layout
-	wall_img      *ebiten.Image
-	door_img      *ebiten.Image
-	floor_img     *ebiten.Image
-	is_cam_reset  bool
-	show_hitboxes bool
-	tick          int // tick starts at 0, increments 60x/sec, and resets to 0 when you go back in time
+	cam               *kamera.Camera
+	game_map          *dngn.Layout
+	wall_img          *ebiten.Image
+	door_img          *ebiten.Image
+	floor_img         *ebiten.Image
+	is_cam_reset      bool
+	show_hitboxes     bool
+	tick              int // tick starts at 0, increments 60x/sec, and resets to 0 when you go back in time
+	has_time_traveled bool
 )
 
 type Game struct {
@@ -113,22 +115,46 @@ func (g *Game) Update() error {
 	is_cam_reset = g.player_input.ActionIsPressed(action_cam_reset)
 	show_hitboxes = g.player_input.ActionIsPressed(action_hitbox)
 	was_walking := g.player.dx != 0 || g.player.dy != 0
+	if g.player_input.ActionIsJustPressed(action_time_travel) {
+		tick = 0
+		g.player.x = g.player.start_x * 16
+		g.player.y = g.player.start_y * 16
 
-	// store just pressed/released action in an input history point
-	hist_point := InputHistoryPoint{tick: tick}
-	input_changed := false
-	for _, action := range hist_actions {
-		if g.player_input.ActionIsJustPressed(action) {
-			hist_point.just_pressed[action] = true
-			input_changed = true
-		}
-		if g.player_input.ActionIsJustReleased(action) {
-			hist_point.just_released[action] = true
-			input_changed = true
-		}
+		// the "position" in resolv is the *center* of the player, not the top-left
+		// so we need to compensate
+		g.player.rect.SetPosition(g.player.x+(16/2), g.player.y+(32/2))
+		has_time_traveled = true
 	}
-	if input_changed {
-		g.player.history = append(g.player.history, hist_point)
+
+	var hist_point InputHistoryPoint
+
+	if has_time_traveled {
+		// make sure we haven't overrun the list of history points
+		if g.player.hist_ix < len(g.player.history) {
+			// if the next-up history point is the current tick/frame, advance to it
+			next_up_hist_point := g.player.history[g.player.hist_ix]
+			if next_up_hist_point.tick == tick {
+				hist_point = next_up_hist_point
+				g.player.hist_ix++ // advance to next history point
+			}
+		}
+	} else {
+		// store just pressed/released action in an input history point
+		hist_point = InputHistoryPoint{tick: tick}
+		input_changed := false
+		for _, action := range hist_actions {
+			if g.player_input.ActionIsJustPressed(action) {
+				hist_point.just_pressed[action] = true
+				input_changed = true
+			}
+			if g.player_input.ActionIsJustReleased(action) {
+				hist_point.just_released[action] = true
+				input_changed = true
+			}
+		}
+		if input_changed {
+			g.player.history = append(g.player.history, hist_point)
+		}
 	}
 
 	// keep is_pressed array updated
@@ -315,12 +341,13 @@ func main() {
 	// initialize input system
 	g.input_system.Init(input.SystemConfig{DevicesEnabled: input.AnyDevice})
 	keymap := input.Keymap{
-		action_left:      {input.KeyLeft, input.KeyA},
-		action_right:     {input.KeyRight, input.KeyD},
-		action_up:        {input.KeyUp, input.KeyW},
-		action_down:      {input.KeyDown, input.KeyS},
-		action_cam_reset: {input.KeyC},
-		action_hitbox:    {input.KeyH},
+		action_left:        {input.KeyLeft, input.KeyA},
+		action_right:       {input.KeyRight, input.KeyD},
+		action_up:          {input.KeyUp, input.KeyW},
+		action_down:        {input.KeyDown, input.KeyS},
+		action_cam_reset:   {input.KeyC},
+		action_hitbox:      {input.KeyH},
+		action_time_travel: {input.KeyT},
 	}
 	g.player_input = g.input_system.NewHandler(0, keymap)
 	g.player = &Player{}
