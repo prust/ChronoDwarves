@@ -27,12 +27,15 @@ import (
 var sounds embed.FS
 
 const (
+	// history actions (need to be first)
 	action_left input.Action = iota
 	action_right
 	action_up
 	action_down
+	// misc non-history actions
 	action_cam_reset
 	action_hitbox
+
 	sample_rate  = 48000
 	anim_rate    = time.Second / 8 // 8fps pixel art animation (looping 3-frame walk cycles)
 	player_speed = 4
@@ -42,6 +45,9 @@ const (
 	screen_h     = window_h / 4
 )
 
+var hist_actions = [4]input.Action{action_left, action_right, action_up, action_down}
+
+var red = color.RGBA{R: 255, G: 0, B: 0, A: 255}
 var (
 	cam           *kamera.Camera
 	game_map      *dngn.Layout
@@ -50,7 +56,7 @@ var (
 	floor_img     *ebiten.Image
 	is_cam_reset  bool
 	show_hitboxes bool
-	red           color.RGBA
+	tick          int // tick starts at 0, increments 60x/sec, and resets to 0 when you go back in time
 )
 
 type Game struct {
@@ -65,14 +71,29 @@ type Game struct {
 	wall_rects    []*resolv.ConvexPolygon
 }
 
+// each "past self" of a player is a separate Player instance
+// with a separate starting position, input history, current position, etc
 type Player struct {
-	x          float64
+	start_x    float64 // start pos in cell coordinates (not in px)
+	start_y    float64
+	x          float64 // curr pos in px
 	y          float64
-	dx         float64
+	dx         float64 // delta position (velocity)
 	dy         float64
 	rect       *resolv.ConvexPolygon // DRY violation w/ x,y -- should we solely use the collision lib rect?
 	dir        int                   // direction player is facing (indexes the animation array)
 	walk_sound *audio.Player
+	history    []InputHistoryPoint // condensed array of input history
+	hist_ix    int                 // index of the next input history point during a replay
+	is_pressed [4]bool             // track state of currently-pressed actions
+}
+
+// the game's tick increments 60x/sec
+// but a history *point* is only recorded for a tick if the input changed
+type InputHistoryPoint struct {
+	tick          int
+	just_pressed  [4]bool
+	just_released [4]bool
 }
 
 func (p *Player) NormalizeVelocity() {
@@ -87,21 +108,49 @@ func (p *Player) NormalizeVelocity() {
 
 func (g *Game) Update() error {
 	g.input_system.Update()
+
+	// diagnostic actions & previous state
 	is_cam_reset = g.player_input.ActionIsPressed(action_cam_reset)
 	show_hitboxes = g.player_input.ActionIsPressed(action_hitbox)
 	was_walking := g.player.dx != 0 || g.player.dy != 0
 
-	if g.player_input.ActionIsPressed(action_left) {
+	// store just pressed/released action in an input history point
+	hist_point := InputHistoryPoint{tick: tick}
+	input_changed := false
+	for _, action := range hist_actions {
+		if g.player_input.ActionIsJustPressed(action) {
+			hist_point.just_pressed[action] = true
+			input_changed = true
+		}
+		if g.player_input.ActionIsJustReleased(action) {
+			hist_point.just_released[action] = true
+			input_changed = true
+		}
+	}
+	if input_changed {
+		g.player.history = append(g.player.history, hist_point)
+	}
+
+	// keep is_pressed array updated
+	for _, action := range hist_actions {
+		if hist_point.just_pressed[action] {
+			g.player.is_pressed[action] = true
+		} else if hist_point.just_released[action] {
+			g.player.is_pressed[action] = false
+		}
+	}
+
+	if g.player.is_pressed[action_left] {
 		g.player.dx = -player_speed
-	} else if g.player_input.ActionIsPressed(action_right) {
+	} else if g.player.is_pressed[action_right] {
 		g.player.dx = player_speed
 	} else {
 		g.player.dx = 0
 	}
 
-	if g.player_input.ActionIsPressed(action_up) {
+	if g.player.is_pressed[action_up] {
 		g.player.dy = -player_speed
-	} else if g.player_input.ActionIsPressed(action_down) {
+	} else if g.player.is_pressed[action_down] {
 		g.player.dy = player_speed
 	} else {
 		g.player.dy = 0
@@ -128,23 +177,23 @@ func (g *Game) Update() error {
 		},
 	})
 
-	if g.player_input.ActionIsJustPressed(action_down) {
+	if hist_point.just_pressed[action_down] {
 		g.player.dir = 0
-	} else if g.player_input.ActionIsJustPressed(action_right) {
+	} else if hist_point.just_pressed[action_right] {
 		g.player.dir = 1
-	} else if g.player_input.ActionIsJustPressed(action_left) {
+	} else if hist_point.just_pressed[action_left] {
 		g.player.dir = 2
-	} else if g.player_input.ActionIsJustPressed(action_up) {
+	} else if hist_point.just_pressed[action_up] {
 		g.player.dir = 3
-	} else if g.player_input.ActionIsJustReleased(action_down) || g.player_input.ActionIsJustReleased(action_right) || g.player_input.ActionIsJustReleased(action_left) || g.player_input.ActionIsJustReleased(action_up) {
+	} else if hist_point.just_released[action_down] || hist_point.just_released[action_right] || hist_point.just_released[action_left] || hist_point.just_released[action_up] {
 		// if the player just released a key, change direction based on any other key that is still pressed
-		if g.player_input.ActionIsPressed(action_down) {
+		if g.player.is_pressed[action_down] {
 			g.player.dir = 0
-		} else if g.player_input.ActionIsPressed(action_right) {
+		} else if g.player.is_pressed[action_right] {
 			g.player.dir = 1
-		} else if g.player_input.ActionIsPressed(action_left) {
+		} else if g.player.is_pressed[action_left] {
 			g.player.dir = 2
-		} else if g.player_input.ActionIsPressed(action_up) {
+		} else if g.player.is_pressed[action_up] {
 			g.player.dir = 3
 		}
 	}
@@ -166,6 +215,8 @@ func (g *Game) Update() error {
 	} else {
 		cam.LookAt(float64(g.player.x), float64(g.player.y))
 	}
+
+	tick++
 	return nil
 }
 
@@ -214,8 +265,6 @@ func (g *Game) Layout(outsideWidth, outsideHeight int) (screenWidth, screenHeigh
 }
 
 func main() {
-	red = color.RGBA{R: 255, G: 0, B: 0, A: 255}
-
 	ebiten.SetWindowSize(window_w, window_h)
 	ebiten.SetWindowTitle("Ebitengine Template")
 
@@ -274,28 +323,26 @@ func main() {
 		action_hitbox:    {input.KeyH},
 	}
 	g.player_input = g.input_system.NewHandler(0, keymap)
-
+	g.player = &Player{}
 	// find a random, empty space in the map to spawn the player
-	var start_x, start_y float64
 	for _ = range 1000 {
 		x := rand.IntN(100)
 		y := rand.IntN(100)
 		// ensure the cell & the one below (since the player is 2 cells high) are empty
 		// disallow the 0,0 coordinate b/c we can't differentiate it from uninitialized vars
 		if (x != 0 || y != 0) && game_map.Get(x, y) == ' ' && game_map.Get(x, y) == ' ' {
-			start_x = float64(x)
-			start_y = float64(y)
+			g.player.start_x = float64(x)
+			g.player.start_y = float64(y)
 			break
 		}
 	}
-	if start_x == 0 && start_y == 0 {
+	if g.player.start_x == 0 && g.player.start_y == 0 {
 		panic("Unable to find an empty pair of cells to spawn player after 1000 tries")
 	}
 
-	g.player = &Player{
-		x: start_x * 16,
-		y: start_y * 16,
-	}
+	g.player.x = g.player.start_x * 16
+	g.player.y = g.player.start_y * 16
+
 	// player hitbox is smaller than the frame
 	g.player.rect = resolv.NewRectangleFromTopLeft(g.player.x+2, g.player.y+11, 11, 19)
 	g.space.Add(g.player.rect)
