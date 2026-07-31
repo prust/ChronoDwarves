@@ -1,4 +1,4 @@
-module github.com/prust/ebitengine-template
+module github.com/prust/ChronoDwarves
 
 go 1.26.5
 

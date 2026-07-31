@@ -3,7 +3,7 @@
 <script>
   const go = new Go();
   WebAssembly.instantiateStreaming(
-    fetch("ebitengine-template.wasm"),
+    fetch("ChronoDwarves.wasm"),
     go.importObject,
   ).then((result) => {
     go.run(result.instance);
