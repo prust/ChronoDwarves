@@ -54,25 +54,25 @@ var (
 )
 
 type Game struct {
-	player            *Player
-	player_anim       [4]*ganim8.Animation // an animation for each of the 4 directions
-	player_dir        int                  // indexes the animation array
-	screen_w          int
-	screen_h          int
-	input_system      input.System
-	player_input      *input.Handler
-	audio_context     *audio.Context
-	player_walk_sound *audio.Player
-	space             *resolv.Space
-	wall_rects        []*resolv.ConvexPolygon
+	player        *Player
+	player_anim   [4]*ganim8.Animation // an animation for each of the 4 directions
+	screen_w      int
+	screen_h      int
+	input_system  input.System
+	player_input  *input.Handler
+	audio_context *audio.Context
+	space         *resolv.Space
+	wall_rects    []*resolv.ConvexPolygon
 }
 
 type Player struct {
-	x    float64
-	y    float64
-	dx   float64
-	dy   float64
-	rect *resolv.ConvexPolygon // DRY violation w/ x,y -- should we solely use the collision lib rect?
+	x          float64
+	y          float64
+	dx         float64
+	dy         float64
+	rect       *resolv.ConvexPolygon // DRY violation w/ x,y -- should we solely use the collision lib rect?
+	dir        int                   // direction player is facing (indexes the animation array)
+	walk_sound *audio.Player
 }
 
 func (p *Player) NormalizeVelocity() {
@@ -129,36 +129,36 @@ func (g *Game) Update() error {
 	})
 
 	if g.player_input.ActionIsJustPressed(action_down) {
-		g.player_dir = 0
+		g.player.dir = 0
 	} else if g.player_input.ActionIsJustPressed(action_right) {
-		g.player_dir = 1
+		g.player.dir = 1
 	} else if g.player_input.ActionIsJustPressed(action_left) {
-		g.player_dir = 2
+		g.player.dir = 2
 	} else if g.player_input.ActionIsJustPressed(action_up) {
-		g.player_dir = 3
+		g.player.dir = 3
 	} else if g.player_input.ActionIsJustReleased(action_down) || g.player_input.ActionIsJustReleased(action_right) || g.player_input.ActionIsJustReleased(action_left) || g.player_input.ActionIsJustReleased(action_up) {
 		// if the player just released a key, change direction based on any other key that is still pressed
 		if g.player_input.ActionIsPressed(action_down) {
-			g.player_dir = 0
+			g.player.dir = 0
 		} else if g.player_input.ActionIsPressed(action_right) {
-			g.player_dir = 1
+			g.player.dir = 1
 		} else if g.player_input.ActionIsPressed(action_left) {
-			g.player_dir = 2
+			g.player.dir = 2
 		} else if g.player_input.ActionIsPressed(action_up) {
-			g.player_dir = 3
+			g.player.dir = 3
 		}
 	}
 
 	if !was_walking && is_walking {
-		g.player_walk_sound.Rewind()
-		g.player_walk_sound.Play()
+		g.player.walk_sound.Rewind()
+		g.player.walk_sound.Play()
 	} else if was_walking && !is_walking {
-		g.player_walk_sound.Pause()
-		g.player_anim[g.player_dir].GoToFrame(2)
+		g.player.walk_sound.Pause()
+		g.player_anim[g.player.dir].GoToFrame(2)
 	}
 
 	if is_walking {
-		g.player_anim[g.player_dir].Update()
+		g.player_anim[g.player.dir].Update()
 	}
 
 	if is_cam_reset {
@@ -199,7 +199,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	}
 	op.GeoM.Reset()
 	op.GeoM.Translate(float64(g.player.x), float64(g.player.y))
-	cam.Draw(g.player_anim[g.player_dir].Frame(), op, screen)
+	cam.Draw(g.player_anim[g.player.dir].Frame(), op, screen)
 
 	if show_hitboxes {
 		for _, wall_rect := range g.wall_rects {
@@ -305,7 +305,7 @@ func main() {
 	walk_wav := loadWav("walk.wav")
 	loop_walk := audio.NewInfiniteLoop(walk_wav, walk_wav.Length())
 	var err error
-	g.player_walk_sound, err = g.audio_context.NewPlayerF32(loop_walk)
+	g.player.walk_sound, err = g.audio_context.NewPlayerF32(loop_walk)
 	check(err)
 
 	// 16x32 frames, 3 frame columns and 4 frame rows
