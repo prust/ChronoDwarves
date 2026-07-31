@@ -1,26 +1,29 @@
-# ebitengine-template
+# ChronoDwarves
 
-General template repository that integrates the main libs as a starting point for game jams.
+**Defend your kin against the giants with time-travel: interact with past runs to perform combo attacks.**
 
-View online at https://prust.github.io/ebitengine-template/.
+But be careful to avoid letting one of your past selves see you, or you will rip the fabric of space/time.
 
-Libraries:
+The WIP can be played online at https://prust.github.io/ChronoDwarves/.
 
-- [x] [ebitengine](https://ebitengine.org/) (game engine for Go)
-- [x] [ganim8](https://github.com/yohamta0/ganim8-lib) (animation lib)
-- [x] [resolv](https://github.com/SolarLune/resolv) (collision lib)
-- [x] [dngn](https://github.com/SolarLune/dngn) (random map generation lib, supports [BSP generation](https://www.roguebasin.com/index.php?title=Basic_BSP_Dungeon_generation) and [random walk](https://www.roguebasin.com/index.php?title=Random_Walk_Cave_Generation) cave generation)
-- [x] [ebitengine-input](https://github.com/quasilyte/ebitengine-input) (input lib)
-- [x] [kamera](https://github.com/setanarut/kamera) (camera lib)
+Note that the graphics are placeholders (our pixel artist won't be able to start until Saturday afternoon).
 
-# How to install and run the game from the terminal
+Acknowlegments:
+
+A huge thank-you to [ebitengine](https://ebitengine.org/), the game engine for Go, and these excellent libraries: [ganim8](https://github.com/yohamta0/ganim8-lib), [resolv](https://github.com/SolarLune/resolv), [dngn](https://github.com/SolarLune/dngn), [ebitengine-input](https://github.com/quasilyte/ebitengine-input), and [kamera](https://github.com/setanarut/kamera).
+
+# How to play locally
+
+In addition to playing the game online at https://prust.github.io/ChronoDwarves/, you can install and run it locally.
+
+It uses about half the CPU when it's run locally. Here are the steps:
 
 - Download & install Go: https://go.dev/dl/
 - Install go modules: `go mod tidy`
 - Run the game: `go run .`
 
-# How to build the game for the browser
+# How to (re)generate the WASM build (linux/unix):
 
 ```
-env GOOS=js GOARCH=wasm go build -o ebitengine-template.wasm github.com/prust/ebitengine-template
+env GOOS=js GOARCH=wasm go build -o ChronoDwarves.wasm github.com/prust/ChronoDwarves
 ```
