@@ -60,6 +60,7 @@ var (
 	show_hitboxes bool
 	tick          int // tick starts at 0, increments 60x/sec, and resets to 0 when you go back in time
 	red           = color.RGBA{R: 255, G: 0, B: 0, A: 255}
+	tag_wall      = resolv.NewTag("wall")
 )
 
 type Game struct {
@@ -204,7 +205,7 @@ func (g *Game) Update() error {
 		// filter to shapes near the player
 		near_shapes := self.rect.SelectTouchingCells(4).FilterShapes()
 		self.rect.IntersectionTest(resolv.IntersectionTestSettings{
-			TestAgainst: near_shapes,
+			TestAgainst: near_shapes.ByTags(tag_wall),
 			OnIntersect: func(set resolv.IntersectionSet) bool {
 				// back off from what we collided/intersected with
 				self.rect.MoveVec(set.MTV)
@@ -349,6 +350,7 @@ func main() {
 	g.wall_rects = make([]*resolv.ConvexPolygon, 0, len(wall_select.Cells))
 	for cell := range wall_select.Cells {
 		wall_rect := resolv.NewRectangleFromTopLeft(float64(cell.X)*grid_size, float64(cell.Y)*grid_size, grid_size, grid_size)
+		wall_rect.Tags().Set(tag_wall)
 		g.wall_rects = append(g.wall_rects, wall_rect)
 		g.space.Add(wall_rect)
 	}
