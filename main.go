@@ -27,15 +27,22 @@ import (
 var sounds embed.FS
 
 const (
+	// history actions (need to be first)
 	action_left input.Action = iota
 	action_right
 	action_up
 	action_down
+	// misc non-history actions
 	action_cam_reset
 	action_hitbox
+	action_time_travel
+
 	sample_rate  = 48000
 	anim_rate    = time.Second / 8 // 8fps pixel art animation (looping 3-frame walk cycles)
 	player_speed = 4
+	player_w     = 16
+	player_h     = 32
+	grid_size    = 16
 	window_w     = 1024
 	window_h     = 768
 	screen_w     = window_w / 4
@@ -43,6 +50,7 @@ const (
 )
 
 var (
+	hist_actions  = [4]input.Action{action_left, action_right, action_up, action_down}
 	cam           *kamera.Camera
 	game_map      *dngn.Layout
 	wall_img      *ebiten.Image
@@ -50,29 +58,46 @@ var (
 	floor_img     *ebiten.Image
 	is_cam_reset  bool
 	show_hitboxes bool
-	red           color.RGBA
+	tick          int // tick starts at 0, increments 60x/sec, and resets to 0 when you go back in time
+	red           = color.RGBA{R: 255, G: 0, B: 0, A: 255}
+	tag_wall      = resolv.NewTag("wall")
 )
 
 type Game struct {
-	player            *Player
-	player_anim       [4]*ganim8.Animation // an animation for each of the 4 directions
-	player_dir        int                  // indexes the animation array
-	screen_w          int
-	screen_h          int
-	input_system      input.System
-	player_input      *input.Handler
-	audio_context     *audio.Context
-	player_walk_sound *audio.Player
-	space             *resolv.Space
-	wall_rects        []*resolv.ConvexPolygon
+	selves        []*Player            // past selves & current self
+	player_anim   [4]*ganim8.Animation // an animation for each of the 4 directions
+	screen_w      int
+	screen_h      int
+	input_system  input.System
+	player_input  *input.Handler
+	audio_context *audio.Context
+	space         *resolv.Space
+	wall_rects    []*resolv.ConvexPolygon
 }
 
+// each "past self" of a player is a separate Player instance
+// with a separate starting position, input history, current position, etc
 type Player struct {
-	x    float64
-	y    float64
-	dx   float64
-	dy   float64
-	rect *resolv.ConvexPolygon // DRY violation w/ x,y -- should we solely use the collision lib rect?
+	start_x    float64 // start pos in cell coordinates (not in px)
+	start_y    float64
+	x          float64 // curr pos in px
+	y          float64
+	dx         float64 // delta position (velocity)
+	dy         float64
+	rect       *resolv.ConvexPolygon // DRY violation w/ x,y -- should we solely use the collision lib rect?
+	dir        int                   // direction player is facing (indexes the animation array)
+	walk_sound *audio.Player
+	history    []InputHistoryPoint // condensed array of input history
+	hist_ix    int                 // index of the next input history point during a replay
+	is_pressed [4]bool             // track state of currently-pressed actions
+}
+
+// the game's tick increments 60x/sec
+// but a history *point* is only recorded for a tick if the input changed
+type InputHistoryPoint struct {
+	tick          int
+	just_pressed  [4]bool
+	just_released [4]bool
 }
 
 func (p *Player) NormalizeVelocity() {
@@ -87,85 +112,153 @@ func (p *Player) NormalizeVelocity() {
 
 func (g *Game) Update() error {
 	g.input_system.Update()
+
+	// diagnostic actions & previous state
 	is_cam_reset = g.player_input.ActionIsPressed(action_cam_reset)
 	show_hitboxes = g.player_input.ActionIsPressed(action_hitbox)
-	was_walking := g.player.dx != 0 || g.player.dy != 0
 
-	if g.player_input.ActionIsPressed(action_left) {
-		g.player.dx = -player_speed
-	} else if g.player_input.ActionIsPressed(action_right) {
-		g.player.dx = player_speed
-	} else {
-		g.player.dx = 0
+	if g.player_input.ActionIsJustPressed(action_time_travel) {
+		tick = 0
+		g.selves = append(g.selves, initPlayer(g))
 	}
 
-	if g.player_input.ActionIsPressed(action_up) {
-		g.player.dy = -player_speed
-	} else if g.player_input.ActionIsPressed(action_down) {
-		g.player.dy = player_speed
-	} else {
-		g.player.dy = 0
-	}
-	is_walking := g.player.dx != 0 || g.player.dy != 0
+	for ix, self := range g.selves {
+		// a "past" self (replaying input history) vs "current" self (reacting to player input)
+		is_current_self := ix == len(g.selves)-1
+		is_past_self := !is_current_self
 
-	g.player.NormalizeVelocity()
+		if g.player_input.ActionIsJustPressed(action_time_travel) {
+			self.x = self.start_x * grid_size
+			self.y = self.start_y * grid_size
 
-	g.player.x += g.player.dx
-	g.player.y += g.player.dy
-	g.player.rect.Move(g.player.dx, g.player.dy)
+			// the "position" in resolv is the *center* of the player, not the top-left
+			// so we need to compensate
+			self.rect.SetPosition(self.x+(player_w/2), self.y+(player_h/2))
+			self.hist_ix = 0
+		}
 
-	// filter to shapes near the player
-	near_shapes := g.player.rect.SelectTouchingCells(4).FilterShapes()
-	g.player.rect.IntersectionTest(resolv.IntersectionTestSettings{
-		TestAgainst: near_shapes,
-		OnIntersect: func(set resolv.IntersectionSet) bool {
-			// back off from what we collided/intersected with
-			g.player.rect.MoveVec(set.MTV)
-			g.player.x += set.MTV.X
-			g.player.y += set.MTV.Y
-			// keep iterating (in case we're touching something else)
-			return true
-		},
-	})
+		was_walking := self.dx != 0 || self.dy != 0
+		var hist_point InputHistoryPoint
 
-	if g.player_input.ActionIsJustPressed(action_down) {
-		g.player_dir = 0
-	} else if g.player_input.ActionIsJustPressed(action_right) {
-		g.player_dir = 1
-	} else if g.player_input.ActionIsJustPressed(action_left) {
-		g.player_dir = 2
-	} else if g.player_input.ActionIsJustPressed(action_up) {
-		g.player_dir = 3
-	} else if g.player_input.ActionIsJustReleased(action_down) || g.player_input.ActionIsJustReleased(action_right) || g.player_input.ActionIsJustReleased(action_left) || g.player_input.ActionIsJustReleased(action_up) {
-		// if the player just released a key, change direction based on any other key that is still pressed
-		if g.player_input.ActionIsPressed(action_down) {
-			g.player_dir = 0
-		} else if g.player_input.ActionIsPressed(action_right) {
-			g.player_dir = 1
-		} else if g.player_input.ActionIsPressed(action_left) {
-			g.player_dir = 2
-		} else if g.player_input.ActionIsPressed(action_up) {
-			g.player_dir = 3
+		if is_past_self {
+			// make sure we haven't overrun the list of history points
+			if self.hist_ix < len(self.history) {
+				// if the next-up history point is the current tick/frame, advance to it
+				next_up_hist_point := self.history[self.hist_ix]
+				if next_up_hist_point.tick == tick {
+					hist_point = next_up_hist_point
+					self.hist_ix++ // advance to next history point
+				}
+			}
+		} else {
+			// "current" self
+			// store just pressed/released action in an input history point
+			hist_point = InputHistoryPoint{tick: tick}
+			input_changed := false
+			for _, action := range hist_actions {
+				if g.player_input.ActionIsJustPressed(action) {
+					hist_point.just_pressed[action] = true
+					input_changed = true
+				}
+				if g.player_input.ActionIsJustReleased(action) {
+					hist_point.just_released[action] = true
+					input_changed = true
+				}
+			}
+			if input_changed {
+				self.history = append(self.history, hist_point)
+			}
+		}
+
+		// keep is_pressed array updated
+		for _, action := range hist_actions {
+			if hist_point.just_pressed[action] {
+				self.is_pressed[action] = true
+			} else if hist_point.just_released[action] {
+				self.is_pressed[action] = false
+			}
+		}
+
+		if self.is_pressed[action_left] {
+			self.dx = -player_speed
+		} else if self.is_pressed[action_right] {
+			self.dx = player_speed
+		} else {
+			self.dx = 0
+		}
+
+		if self.is_pressed[action_up] {
+			self.dy = -player_speed
+		} else if self.is_pressed[action_down] {
+			self.dy = player_speed
+		} else {
+			self.dy = 0
+		}
+		is_walking := self.dx != 0 || self.dy != 0
+
+		self.NormalizeVelocity()
+
+		self.x += self.dx
+		self.y += self.dy
+		self.rect.Move(self.dx, self.dy)
+
+		// filter to shapes near the player
+		near_shapes := self.rect.SelectTouchingCells(4).FilterShapes()
+		self.rect.IntersectionTest(resolv.IntersectionTestSettings{
+			TestAgainst: near_shapes.ByTags(tag_wall),
+			OnIntersect: func(set resolv.IntersectionSet) bool {
+				// back off from what we collided/intersected with
+				self.rect.MoveVec(set.MTV)
+				self.x += set.MTV.X
+				self.y += set.MTV.Y
+				// keep iterating (in case we're touching something else)
+				return true
+			},
+		})
+
+		if hist_point.just_pressed[action_down] {
+			self.dir = 0
+		} else if hist_point.just_pressed[action_right] {
+			self.dir = 1
+		} else if hist_point.just_pressed[action_left] {
+			self.dir = 2
+		} else if hist_point.just_pressed[action_up] {
+			self.dir = 3
+		} else if hist_point.just_released[action_down] || hist_point.just_released[action_right] || hist_point.just_released[action_left] || hist_point.just_released[action_up] {
+			// if the player just released a key, change direction based on any other key that is still pressed
+			if self.is_pressed[action_down] {
+				self.dir = 0
+			} else if self.is_pressed[action_right] {
+				self.dir = 1
+			} else if self.is_pressed[action_left] {
+				self.dir = 2
+			} else if self.is_pressed[action_up] {
+				self.dir = 3
+			}
+		}
+
+		if !was_walking && is_walking {
+			self.walk_sound.Rewind()
+			self.walk_sound.Play()
+		} else if was_walking && !is_walking {
+			self.walk_sound.Pause()
+			g.player_anim[self.dir].GoToFrame(2)
+		}
+
+		if is_walking {
+			g.player_anim[self.dir].Update()
+		}
+
+		if is_current_self {
+			if is_cam_reset {
+				cam.SetTopLeft(0, 0)
+			} else {
+				cam.LookAt(float64(self.x), float64(self.y))
+			}
 		}
 	}
 
-	if !was_walking && is_walking {
-		g.player_walk_sound.Rewind()
-		g.player_walk_sound.Play()
-	} else if was_walking && !is_walking {
-		g.player_walk_sound.Pause()
-		g.player_anim[g.player_dir].GoToFrame(2)
-	}
-
-	if is_walking {
-		g.player_anim[g.player_dir].Update()
-	}
-
-	if is_cam_reset {
-		cam.SetTopLeft(0, 0)
-	} else {
-		cam.LookAt(float64(g.player.x), float64(g.player.y))
-	}
+	tick++
 	return nil
 }
 
@@ -181,9 +274,9 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	op := &ebiten.DrawImageOptions{}
 	for cell := range map_select.Cells {
 		// cull (only draw what's actually on-screen to avoid 100% CPU usage)
-		if isRectangleOverlap(x1, y1, x2, y2, float64(cell.X*16), float64(cell.Y*16), float64(cell.X*16+16), float64(cell.Y*16+16)) {
+		if isRectangleOverlap(x1, y1, x2, y2, float64(cell.X*grid_size), float64(cell.Y*grid_size), float64(cell.X*grid_size+grid_size), float64(cell.Y*grid_size+grid_size)) {
 			op.GeoM.Reset()
-			op.GeoM.Translate(float64(cell.X*16), float64(cell.Y*16))
+			op.GeoM.Translate(float64(cell.X*grid_size), float64(cell.Y*grid_size))
 			// smooth anti-aliasing (and so ebitengine batches calls due to identical Filter param)
 			// op.Filter = ebiten.FilterLinear
 
@@ -197,15 +290,21 @@ func (g *Game) Draw(screen *ebiten.Image) {
 			}
 		}
 	}
-	op.GeoM.Reset()
-	op.GeoM.Translate(float64(g.player.x), float64(g.player.y))
-	cam.Draw(g.player_anim[g.player_dir].Frame(), op, screen)
 
 	if show_hitboxes {
 		for _, wall_rect := range g.wall_rects {
 			drawHitbox(wall_rect, cam, screen)
 		}
-		drawHitbox(g.player.rect, cam, screen)
+	}
+
+	for _, player := range g.selves {
+		op.GeoM.Reset()
+		op.GeoM.Translate(float64(player.x), float64(player.y))
+		cam.Draw(g.player_anim[player.dir].Frame(), op, screen)
+
+		if show_hitboxes {
+			drawHitbox(player.rect, cam, screen)
+		}
 	}
 }
 
@@ -214,8 +313,6 @@ func (g *Game) Layout(outsideWidth, outsideHeight int) (screenWidth, screenHeigh
 }
 
 func main() {
-	red = color.RGBA{R: 255, G: 0, B: 0, A: 255}
-
 	ebiten.SetWindowSize(window_w, window_h)
 	ebiten.SetWindowTitle("Ebitengine Template")
 
@@ -247,12 +344,13 @@ func main() {
 	}
 
 	// create resolv (collision detection) rectangles for walls in the grid
-	// trying a 32x32 "cell" size (for now) for performant collision checks
-	g.space = resolv.NewSpace(100*16, 100*16, 32, 32)
+	// trying a 4x "cell" size (double grid width & double grid height) for performant collision checks
+	g.space = resolv.NewSpace(100*grid_size, 100*grid_size, grid_size*2, grid_size*2)
 	wall_select := game_map.Select().FilterByRune('x')
 	g.wall_rects = make([]*resolv.ConvexPolygon, 0, len(wall_select.Cells))
 	for cell := range wall_select.Cells {
-		wall_rect := resolv.NewRectangleFromTopLeft(float64(cell.X)*16, float64(cell.Y)*16, 16, 16)
+		wall_rect := resolv.NewRectangleFromTopLeft(float64(cell.X)*grid_size, float64(cell.Y)*grid_size, grid_size, grid_size)
+		wall_rect.Tags().Set(tag_wall)
 		g.wall_rects = append(g.wall_rects, wall_rect)
 		g.space.Add(wall_rect)
 	}
@@ -266,56 +364,27 @@ func main() {
 	// initialize input system
 	g.input_system.Init(input.SystemConfig{DevicesEnabled: input.AnyDevice})
 	keymap := input.Keymap{
-		action_left:      {input.KeyLeft, input.KeyA},
-		action_right:     {input.KeyRight, input.KeyD},
-		action_up:        {input.KeyUp, input.KeyW},
-		action_down:      {input.KeyDown, input.KeyS},
-		action_cam_reset: {input.KeyC},
-		action_hitbox:    {input.KeyH},
+		action_left:        {input.KeyLeft, input.KeyA},
+		action_right:       {input.KeyRight, input.KeyD},
+		action_up:          {input.KeyUp, input.KeyW},
+		action_down:        {input.KeyDown, input.KeyS},
+		action_cam_reset:   {input.KeyC},
+		action_hitbox:      {input.KeyH},
+		action_time_travel: {input.KeyT},
 	}
 	g.player_input = g.input_system.NewHandler(0, keymap)
-
-	// find a random, empty space in the map to spawn the player
-	var start_x, start_y float64
-	for _ = range 1000 {
-		x := rand.IntN(100)
-		y := rand.IntN(100)
-		// ensure the cell & the one below (since the player is 2 cells high) are empty
-		// disallow the 0,0 coordinate b/c we can't differentiate it from uninitialized vars
-		if (x != 0 || y != 0) && game_map.Get(x, y) == ' ' && game_map.Get(x, y) == ' ' {
-			start_x = float64(x)
-			start_y = float64(y)
-			break
-		}
-	}
-	if start_x == 0 && start_y == 0 {
-		panic("Unable to find an empty pair of cells to spawn player after 1000 tries")
-	}
-
-	g.player = &Player{
-		x: start_x * 16,
-		y: start_y * 16,
-	}
-	// player hitbox is smaller than the frame
-	g.player.rect = resolv.NewRectangleFromTopLeft(g.player.x+2, g.player.y+11, 11, 19)
-	g.space.Add(g.player.rect)
-
 	g.audio_context = audio.NewContext(sample_rate)
+	player := initPlayer(g)
+	g.selves = append(g.selves, player)
 
-	walk_wav := loadWav("walk.wav")
-	loop_walk := audio.NewInfiniteLoop(walk_wav, walk_wav.Length())
-	var err error
-	g.player_walk_sound, err = g.audio_context.NewPlayerF32(loop_walk)
-	check(err)
-
-	// 16x32 frames, 3 frame columns and 4 frame rows
-	g32 := ganim8.NewGrid(16, 32, 16*3, 32*4)
+	// 3 frame columns and 4 frame rows
+	g32 := ganim8.NewGrid(player_w, player_h, player_w*3, player_h*4)
 	g.player_anim[0] = ganim8.New(character_img, g32.Frames("1-3", 1), anim_rate)
 	g.player_anim[1] = ganim8.New(character_img, g32.Frames("1-3", 2), anim_rate)
 	g.player_anim[2] = ganim8.New(character_img, g32.Frames("1-3", 3), anim_rate)
 	g.player_anim[3] = ganim8.New(character_img, g32.Frames("1-3", 4), anim_rate)
 
-	cam = kamera.NewCamera(g.player.x, g.player.y, float64(g.screen_w), float64(g.screen_h))
+	cam = kamera.NewCamera(player.x, player.y, float64(g.screen_w), float64(g.screen_h))
 	cam.ShakeEnabled = true
 	cam.SmoothType = kamera.SmoothDamp
 	cam.SmoothOptions.SmoothDampTimeX = 0.15
@@ -323,6 +392,41 @@ func main() {
 	if err := ebiten.RunGame(g); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func initPlayer(g *Game) *Player {
+	player := &Player{}
+
+	// find a random, empty space in the map to spawn the player
+	for _ = range 1000 {
+		x := rand.IntN(100)
+		y := rand.IntN(100)
+		// ensure the cell & the one below (since the player is 2 cells high) are empty
+		// disallow the 0,0 coordinate b/c we can't differentiate it from uninitialized vars
+		if (x != 0 || y != 0) && game_map.Get(x, y) == ' ' && game_map.Get(x, y) == ' ' {
+			player.start_x = float64(x)
+			player.start_y = float64(y)
+			break
+		}
+	}
+	if player.start_x == 0 && player.start_y == 0 {
+		panic("Unable to find an empty pair of cells to spawn player after 1000 tries")
+	}
+
+	player.x = player.start_x * grid_size
+	player.y = player.start_y * grid_size
+
+	// player hitbox is smaller than the frame
+	player.rect = resolv.NewRectangleFromTopLeft(player.x+2, player.y+11, 11, 19)
+	g.space.Add(player.rect)
+
+	walk_wav := loadWav("walk.wav")
+	loop_walk := audio.NewInfiniteLoop(walk_wav, walk_wav.Length())
+	var err error
+	player.walk_sound, err = g.audio_context.NewPlayerF32(loop_walk)
+	check(err)
+
+	return player
 }
 
 // wav files shouldn't be closed here b/c audio.Player manages stream state
