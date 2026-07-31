@@ -32,6 +32,10 @@ const (
 	sample_rate  = 48000
 	anim_rate    = time.Second / 8 // 8fps pixel art animation (looping 3-frame walk cycles)
 	player_speed = 4
+	window_w     = 1024
+	window_h     = 768
+	screen_w     = window_w / 4
+	screen_h     = window_h / 4
 )
 
 var (
@@ -189,12 +193,12 @@ func (g *Game) Layout(outsideWidth, outsideHeight int) (screenWidth, screenHeigh
 }
 
 func main() {
-	ebiten.SetWindowSize(1280, 960)
+	ebiten.SetWindowSize(window_w, window_h)
 	ebiten.SetWindowTitle("Ebitengine Template")
 
 	g := &Game{
-		screen_w: 640,
-		screen_h: 480,
+		screen_w: screen_w,
+		screen_h: screen_h,
 	}
 
 	// generate map
