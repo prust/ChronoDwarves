@@ -29,8 +29,8 @@ const (
 	action_right
 	action_up
 	action_down
-	sample_rate = 48000
-	anim_rate   = time.Second / 8 // 8fps pixel art animation (looping 3-frame walk cycles)
+	sample_rate  = 48000
+	anim_rate    = time.Second / 8 // 8fps pixel art animation (looping 3-frame walk cycles)
 	player_speed = 4
 )
 
@@ -64,7 +64,7 @@ type Player struct {
 }
 
 func (p *Player) NormalizeVelocity() {
-	length_squared := math.Sqrt(p.dx * p.dx + p.dy * p.dy)
+	length_squared := math.Sqrt(p.dx*p.dx + p.dy*p.dy)
 	if length_squared == 0 {
 		return
 	} else {
@@ -229,7 +229,7 @@ func main() {
 	}
 
 	// load images/spritesheets
-	var character_img = loadImg("character_sheet.png")
+	var character_img = loadImg("dwarf_character.png")
 	wall_img = loadImg("wall.png")
 	door_img = loadImg("door.png")
 	floor_img = loadImg("floor.png")
