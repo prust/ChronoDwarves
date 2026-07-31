@@ -252,7 +252,7 @@ func main() {
 	wall_select := game_map.Select().FilterByRune('x')
 	g.wall_rects = make([]*resolv.ConvexPolygon, 0, len(wall_select.Cells))
 	for cell := range wall_select.Cells {
-		wall_rect := resolv.NewRectangle(float64(cell.X)*16, float64(cell.Y)*16, 16, 16)
+		wall_rect := resolv.NewRectangleFromTopLeft(float64(cell.X)*16, float64(cell.Y)*16, 16, 16)
 		g.wall_rects = append(g.wall_rects, wall_rect)
 		g.space.Add(wall_rect)
 	}
@@ -296,7 +296,7 @@ func main() {
 		x: start_x * 16,
 		y: start_y * 16,
 	}
-	g.player.rect = resolv.NewRectangle(g.player.x, g.player.y, 16, 32)
+	g.player.rect = resolv.NewRectangleFromTopLeft(g.player.x, g.player.y, 16, 32)
 	g.space.Add(g.player.rect)
 
 	g.audio_context = audio.NewContext(sample_rate)
