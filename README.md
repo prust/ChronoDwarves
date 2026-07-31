@@ -10,7 +10,7 @@ Note that the graphics are placeholders (our pixel artist won't be able to start
 
 Acknowlegments:
 
-A huge thank-you to [ebitengine](https://ebitengine.org/), the game engine for Go, and these excellent libraries: [ganim8](https://github.com/yohamta0/ganim8-lib), [resolv](https://github.com/SolarLune/resolv), [dngn](https://github.com/SolarLune/dngn), [ebitengine-input](https://github.com/quasilyte/ebitengine-input), and [kamera](https://github.com/setanarut/kamera).
+A huge thank-you to [ebitengine](https://ebitengine.org/) and these excellent libraries: [ganim8](https://github.com/yohamta0/ganim8-lib), [resolv](https://github.com/SolarLune/resolv), [dngn](https://github.com/SolarLune/dngn), [ebitengine-input](https://github.com/quasilyte/ebitengine-input), and [kamera](https://github.com/setanarut/kamera).
 
 # How to play locally
 
