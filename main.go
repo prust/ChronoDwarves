@@ -296,7 +296,8 @@ func main() {
 		x: start_x * 16,
 		y: start_y * 16,
 	}
-	g.player.rect = resolv.NewRectangleFromTopLeft(g.player.x, g.player.y, 16, 32)
+	// player hitbox is smaller than the frame
+	g.player.rect = resolv.NewRectangleFromTopLeft(g.player.x+2, g.player.y+11, 11, 19)
 	g.space.Add(g.player.rect)
 
 	g.audio_context = audio.NewContext(sample_rate)
