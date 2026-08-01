@@ -82,6 +82,7 @@ var (
 	shockwave_dist float64
 	shockwave_snd  *audio.Player
 	red            = color.RGBA{R: 255, G: 0, B: 0, A: 255}
+	blue           = color.RGBA{R: 0, G: 0, B: 255, A: 255}
 	tag_wall       = resolv.NewTag("wall")
 	tag_giant      = resolv.NewTag("giant")
 )
@@ -101,6 +102,7 @@ type Game struct {
 	slimes            []*Slime
 	timer_system      *et.TimerSystem
 	los_lines         []Line // line-of-sight lines, for display
+	shock_line        *Line
 }
 
 // set volume based on nearness of the player, max_dist cells away = 0%, 0 cells away = 100%
@@ -434,6 +436,11 @@ func (g *Game) Update() error {
 					walls := g.space.FilterShapes().ByTags(tag_wall)
 					line_test_settings := resolv.LineTestSettings{Start: g.giant.rect.Position(), End: self.rect.Position(), TestAgainst: walls, OnIntersect: onLineIntersectDiscontinue}
 					if !resolv.LineTest(line_test_settings) {
+						g.shock_line = &Line{x1: g.giant.rect.Position().X, y1: g.giant.rect.Position().Y, x2: self.rect.Position().X, y2: self.rect.Position().Y}
+						g.timer_system.AfterDuration(300*time.Millisecond, func(_ *et.Timer, _ int) et.FinishMode {
+							g.shock_line = nil
+							return et.FinishEnd
+						})
 						self.TakeDamage(giant_damage)
 					}
 				}
@@ -504,9 +511,12 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		}
 	}
 
-	// line-of-sight lines
+	// line-of-sight lines & shock lines
 	for _, line := range g.los_lines {
-		drawRedLine(line.x1, line.y1, line.x2, line.y2, cam, screen)
+		drawLine(line.x1, line.y1, line.x2, line.y2, red, cam, screen)
+	}
+	if g.shock_line != nil {
+		drawLine(g.shock_line.x1, g.shock_line.y1, g.shock_line.x2, g.shock_line.y2, blue, cam, screen)
 	}
 
 	for _, slime := range g.slimes {
@@ -731,10 +741,10 @@ func randomMS(min int, max int) time.Duration {
 
 // drawRedRect() is for debugging purposes (takes world coordinates, translates to screen coords before drawing)
 func drawRedRect(x float64, y float64, x2 float64, y2 float64, cam *kamera.Camera, screen *ebiten.Image) {
-	drawRedLine(x, y, x2, y, cam, screen)
-	drawRedLine(x2, y, x2, y2, cam, screen)
-	drawRedLine(x2, y2, x, y2, cam, screen)
-	drawRedLine(x, y2, x, y, cam, screen)
+	drawLine(x, y, x2, y, red, cam, screen)
+	drawLine(x2, y, x2, y2, red, cam, screen)
+	drawLine(x2, y2, x, y2, red, cam, screen)
+	drawLine(x, y2, x, y, red, cam, screen)
 }
 
 func drawHitbox(box *resolv.ConvexPolygon, cam *kamera.Camera, screen *ebiten.Image) {
@@ -743,18 +753,18 @@ func drawHitbox(box *resolv.ConvexPolygon, cam *kamera.Camera, screen *ebiten.Im
 	var prev_vec resolv.Vector
 	for ix, vec := range box.Points {
 		if ix > 0 {
-			drawRedLine(x+prev_vec.X, y+prev_vec.Y, x+vec.X, y+vec.Y, cam, screen)
+			drawLine(x+prev_vec.X, y+prev_vec.Y, x+vec.X, y+vec.Y, red, cam, screen)
 		}
 		prev_vec = vec
 	}
 	vec := box.Points[0]
-	drawRedLine(x+prev_vec.X, y+prev_vec.Y, x+vec.X, y+vec.Y, cam, screen)
+	drawLine(x+prev_vec.X, y+prev_vec.Y, x+vec.X, y+vec.Y, red, cam, screen)
 }
 
-func drawRedLine(x float64, y float64, x2 float64, y2 float64, cam *kamera.Camera, screen *ebiten.Image) {
+func drawLine(x float64, y float64, x2 float64, y2 float64, col color.RGBA, cam *kamera.Camera, screen *ebiten.Image) {
 	x, y = cam.ApplyCameraTransformToPoint(x, y)
 	x2, y2 = cam.ApplyCameraTransformToPoint(x2, y2)
-	vector.StrokeLine(screen, float32(x), float32(y), float32(x2), float32(y2), 1, red, false)
+	vector.StrokeLine(screen, float32(x), float32(y), float32(x2), float32(y2), 1, col, false)
 }
 
 // boilerplate function that tells resolve to not continue after finding the first intersection
