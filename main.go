@@ -140,17 +140,16 @@ type Player struct {
 
 func (self *Player) TakeDamage(damage int) {
 	self.health -= damage
-	// var sound *audio.Player
+	var sound *audio.Player
 	if self.health <= 0 {
-		// sound = self.death_snd
+		sound = self.death_snd
 		self.dx = 0
 		self.dy = 0
+	} else {
+		sound = self.hurt_snd
 	}
-	// else {
-	// 	sound = self.hurt_snd
-	// }
-	// sound.Rewind()
-	// sound.Play()
+	sound.Rewind()
+	sound.Play()
 	fmt.Println("Ouch!")
 }
 
