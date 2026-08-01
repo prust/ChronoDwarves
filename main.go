@@ -49,6 +49,8 @@ const (
 	window_h     = 768
 	screen_w     = window_w / 4
 	screen_h     = window_h / 4
+	map_w        = 100
+	map_h        = 100
 )
 
 var (
@@ -335,7 +337,7 @@ func main() {
 	}
 
 	// generate map
-	game_map = dngn.NewLayout(100, 100)
+	game_map = dngn.NewLayout(map_w, map_h)
 	game_map.GenerateBSP(dngn.NewDefaultBSPOptions())
 	// extend doors so they are 2 tiles high instead of just 1
 	door_select := game_map.Select().FilterByRune('#')
@@ -347,18 +349,20 @@ func main() {
 	}
 
 	// line the outer border of the map with walls
-	for n := range 100 {
+	for n := range map_w {
 		// left and right walls
 		game_map.Set(n, 0, 'x')
-		game_map.Set(n, 99, 'x')
+		game_map.Set(n, map_h-1, 'x')
+	}
+	for n := range map_h {
 		// top and bottom walls
 		game_map.Set(0, n, 'x')
-		game_map.Set(99, n, 'x')
+		game_map.Set(map_w-1, n, 'x')
 	}
 
 	// create resolv (collision detection) rectangles for walls in the grid
 	// trying a 4x "cell" size (double grid width & double grid height) for performant collision checks
-	g.space = resolv.NewSpace(100*grid_size, 100*grid_size, grid_size*2, grid_size*2)
+	g.space = resolv.NewSpace(map_w*grid_size, map_h*grid_size, grid_size*2, grid_size*2)
 	wall_select := game_map.Select().FilterByRune('x')
 	g.wall_rects = make([]*resolv.ConvexPolygon, 0, len(wall_select.Cells))
 	for cell := range wall_select.Cells {
@@ -438,8 +442,8 @@ func initPlayer(g *Game) *Player {
 func findEmptyCells(width int, height int) (float64, float64) {
 	// find a random, empty space in the map
 	for _ = range 1000 {
-		x := rand.IntN(100)
-		y := rand.IntN(100)
+		x := rand.IntN(map_w)
+		y := rand.IntN(map_h)
 
 		// ensure the requested range of cells are all empty
 		all_are_empty := true
