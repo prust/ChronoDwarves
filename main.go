@@ -102,19 +102,21 @@ type Game struct {
 // each "past self" of a player is a separate Player instance
 // with a separate starting position, input history, current position, etc
 type Player struct {
-	start_x    float64 // start pos in cell coordinates (not in px)
-	start_y    float64
-	x          float64 // curr pos in px
-	y          float64
-	dx         float64 // delta position (velocity)
-	dy         float64
-	rect       *resolv.ConvexPolygon // DRY violation w/ x,y -- should we solely use the collision lib rect?
-	dir        int                   // direction player is facing (indexes the animation array)
-	walk_sound *audio.Player
-	history    []InputHistoryPoint    // condensed array of input history
-	hist_ix    int                    // index of the next input history point during a replay
-	is_pressed [num_hist_actions]bool // track state of currently-pressed actions
-	health     int
+	start_x     float64 // start pos in cell coordinates (not in px)
+	start_y     float64
+	x           float64 // curr pos in px
+	y           float64
+	dx          float64 // delta position (velocity)
+	dy          float64
+	rect        *resolv.ConvexPolygon // DRY violation w/ x,y -- should we solely use the collision lib rect?
+	dir         int                   // direction player is facing (indexes the animation array)
+	walk_sound  *audio.Player
+	hurt_sound  *audio.Player
+	death_sound *audio.Player
+	history     []InputHistoryPoint    // condensed array of input history
+	hist_ix     int                    // index of the next input history point during a replay
+	is_pressed  [num_hist_actions]bool // track state of currently-pressed actions
+	health      int
 }
 
 // the game's tick increments 60x/sec
@@ -171,14 +173,16 @@ func (g *Game) Update() error {
 		is_current_self := ix == len(g.selves)-1
 		is_past_self := !is_current_self
 
-		if g.player_input.ActionIsJustPressed(action_time_travel) {
+		if is_past_self && g.player_input.ActionIsJustPressed(action_time_travel) {
 			self.health = player_start_health
-			self.x = self.start_x * grid_size
-			self.y = self.start_y * grid_size
+			new_x := self.start_x * grid_size
+			new_y := self.start_y * grid_size
 
-			// the "position" in resolv is the *center* of the player, not the top-left
-			// so we need to compensate
-			self.rect.SetPosition(self.x+(player_w/2), self.y+(player_h/2))
+			// we can't simply call SetPosition(center_x, center_y) adjusted with player.w/2 & player.h/2
+			// because our player hitbox isn't exactly the same shape as the player image (player.w/player.h)
+			self.rect.Move(new_x-self.x, new_y-self.y)
+			self.x, self.y = new_x, new_y
+
 			self.hist_ix = 0
 		}
 
@@ -198,16 +202,25 @@ func (g *Game) Update() error {
 
 			// Assuming a target framerate of 60, this means the tick fires once every half second
 			if tick%30 == 0 {
-				active_self := g.selves[len(g.selves)-1]
+				curr_self := g.selves[len(g.selves)-1]
 				past_self_pos := self.rect.Center()
-				active_self_pos := active_self.rect.Center()
+				curr_self_pos := curr_self.rect.Center()
 
 				walls := g.space.FilterShapes().ByTags(tag_wall)
-				line_test_settings := resolv.LineTestSettings{Start: past_self_pos, End: active_self_pos, TestAgainst: walls, OnIntersect: onLineIntersectDiscontinue}
+				line_test_settings := resolv.LineTestSettings{Start: past_self_pos, End: curr_self_pos, TestAgainst: walls, OnIntersect: onLineIntersectDiscontinue}
 				if !resolv.LineTest(line_test_settings) {
-					active_self.health -= 1
 					fmt.Println("Past self sighted current self: time ouch!")
+					curr_self.health -= 1
 					cam.AddTrauma(0.5)
+					var sound *audio.Player
+					if curr_self.health <= 0 {
+						sound = curr_self.death_sound
+					} else {
+						sound = curr_self.hurt_sound
+					}
+					sound.Rewind()
+					sound.Play()
+
 				}
 			}
 		} else {
@@ -374,6 +387,14 @@ func (g *Game) Update() error {
 			if isOnScreen(g, g.giant.rect) {
 				curr_self := g.selves[len(g.selves)-1]
 				curr_self.health -= giant_damage
+				var sound *audio.Player
+				if curr_self.health <= 0 {
+					sound = curr_self.death_sound
+				} else {
+					sound = curr_self.hurt_sound
+				}
+				sound.Rewind()
+				sound.Play()
 				fmt.Println("Ouch!")
 			}
 			// TODO: on this frame, deliver damage to player if the player is still on-screen
@@ -575,6 +596,12 @@ func initPlayer(g *Game) *Player {
 	loop_walk := audio.NewInfiniteLoop(walk_wav, walk_wav.Length())
 	var err error
 	player.walk_sound, err = g.audio_context.NewPlayerF32(loop_walk)
+	check(err)
+	hurt_wav := loadWav("hurt.wav")
+	player.hurt_sound, err = g.audio_context.NewPlayerF32(hurt_wav)
+	check(err)
+	death_wav := loadWav("death.wav")
+	player.death_sound, err = g.audio_context.NewPlayerF32(death_wav)
 	check(err)
 
 	return player
