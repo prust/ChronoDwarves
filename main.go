@@ -408,8 +408,12 @@ func (g *Game) Update() error {
 		if g.giant.shockwave_punch && g.giant_anim.Position() == shockwave_frame {
 			cam.AddTrauma(0.5)
 			for _, self := range g.selves {
-				if self.health > 0 && self.rect.DistanceTo(g.giant.rect) < shockwave_dist {
-					self.TakeDamage(giant_damage)
+				if self.health > 0 {
+					walls := g.space.FilterShapes().ByTags(tag_wall)
+					line_test_settings := resolv.LineTestSettings{Start: g.giant.rect.Position(), End: self.rect.Position(), TestAgainst: walls, OnIntersect: onLineIntersectDiscontinue}
+					if !resolv.LineTest(line_test_settings) {
+						self.TakeDamage(giant_damage)
+					}
 				}
 			}
 			g.giant.shockwave_punch = false
