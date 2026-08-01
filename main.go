@@ -625,10 +625,16 @@ func main() {
 		action_throw_slime: {input.KeyMouseLeft},
 	}
 
+	var err error
 	g.audio_context = audio.NewContext(sample_rate)
 	shockwave_snd = g.LoadSoundPlayer("shockwave.wav")
 	slime_giant_snd = g.LoadSoundPlayer("hit_giant.wav")
 	slime_wall_snd = g.LoadSoundPlayer("hit_wall.wav")
+	ambient_wav := loadWav("ambient.wav")
+	loop_ambient := audio.NewInfiniteLoop(ambient_wav, ambient_wav.Length())
+	ambient_snd, err = g.audio_context.NewPlayerF32(loop_ambient)
+	check(err)
+	ambient_snd.Play()
 
 	g.player_input = g.input_system.NewHandler(0, keymap)
 	player := initPlayer(g)
@@ -687,11 +693,7 @@ func initPlayer(g *Game) *Player {
 	var err error
 	player.walk_snd, err = g.audio_context.NewPlayerF32(loop_walk)
 	check(err)
-	ambient_wav := loadWav("ambient.wav")
-	loop_ambient := audio.NewInfiniteLoop(ambient_wav, ambient_wav.Length())
-	ambient_snd, err = g.audio_context.NewPlayerF32(loop_ambient)
-	check(err)
-	ambient_snd.Play()
+
 	player.hurt_snd = g.LoadSoundPlayer("hurt.wav")
 	player.death_snd = g.LoadSoundPlayer("death.wav")
 
