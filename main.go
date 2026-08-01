@@ -352,6 +352,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		for _, wall_rect := range g.wall_rects {
 			drawHitbox(wall_rect, cam, screen)
 		}
+		drawHitbox(g.giant.rect, cam, screen)
 	}
 
 	op.GeoM.Reset()
@@ -456,6 +457,8 @@ func main() {
 
 	g.giant = &Giant{}
 	g.giant.x, g.giant.y = findEmptyCells(giant_w/grid_size, giant_h/grid_size)
+	g.giant.rect = resolv.NewRectangleFromTopLeft(g.giant.x+3, g.giant.y+20, giant_w-4, giant_h-22)
+	g.space.Add(g.giant.rect)
 
 	cam = kamera.NewCamera(player.x, player.y, float64(g.screen_w), float64(g.screen_h))
 	cam.ShakeEnabled = true
