@@ -82,6 +82,7 @@ var (
 	shockwave_snd   *audio.Player
 	slime_giant_snd *audio.Player
 	slime_wall_snd  *audio.Player
+	ambient_snd     *audio.Player
 	red             = color.RGBA{R: 255, G: 0, B: 0, A: 100}
 	blue            = color.RGBA{R: 0, G: 0, B: 255, A: 100}
 	see_thru_blue   = color.RGBA{R: 0, G: 0, B: 255, A: 10}
@@ -89,6 +90,7 @@ var (
 	tag_giant       = resolv.NewTag("giant")
 	shockwave_dist  = float64(grid_size * 10)
 	throw_dist      = float64(grid_size * 5)
+	max_los_dist    = float64(grid_size * 5)
 )
 
 type Game struct {
@@ -261,21 +263,24 @@ func (g *Game) Update() error {
 				if curr_self.health > 0 && self.health > 0 {
 					past_self_pos := self.rect.Center()
 					curr_self_pos := curr_self.rect.Center()
+					dist := distance(past_self_pos.X, past_self_pos.Y, curr_self_pos.X, curr_self_pos.Y)
+					if dist < max_los_dist {
+						walls := g.space.FilterShapes().ByTags(tag_wall)
+						line_test_settings := resolv.LineTestSettings{Start: past_self_pos, End: curr_self_pos, TestAgainst: walls, OnIntersect: onLineIntersectDiscontinue}
+						if !resolv.LineTest(line_test_settings) {
+							fmt.Println("Past self sighted current self: time ouch!")
+							line := Line{x1: past_self_pos.X, y1: past_self_pos.Y, x2: curr_self_pos.X, y2: curr_self_pos.Y}
 
-					walls := g.space.FilterShapes().ByTags(tag_wall)
-					line_test_settings := resolv.LineTestSettings{Start: past_self_pos, End: curr_self_pos, TestAgainst: walls, OnIntersect: onLineIntersectDiscontinue}
-					if !resolv.LineTest(line_test_settings) {
-						fmt.Println("Past self sighted current self: time ouch!")
-						line := Line{x1: past_self_pos.X, y1: past_self_pos.Y, x2: curr_self_pos.X, y2: curr_self_pos.Y}
-						g.los_lines = append(g.los_lines, line)
-						g.timer_system.AfterDuration(300*time.Millisecond, func(_ *et.Timer, _ int) et.FinishMode {
-							g.los_lines = slices.DeleteFunc(g.los_lines, func(l Line) bool {
-								return l == line
+							g.los_lines = append(g.los_lines, line)
+							g.timer_system.AfterDuration(300*time.Millisecond, func(_ *et.Timer, _ int) et.FinishMode {
+								g.los_lines = slices.DeleteFunc(g.los_lines, func(l Line) bool {
+									return l == line
+								})
+								return et.FinishEnd
 							})
-							return et.FinishEnd
-						})
 
-						curr_self.TakeDamage(1)
+							curr_self.TakeDamage(1)
+						}
 					}
 				}
 			}
@@ -682,6 +687,11 @@ func initPlayer(g *Game) *Player {
 	var err error
 	player.walk_snd, err = g.audio_context.NewPlayerF32(loop_walk)
 	check(err)
+	ambient_wav := loadWav("ambient.wav")
+	loop_ambient := audio.NewInfiniteLoop(ambient_wav, ambient_wav.Length())
+	ambient_snd, err = g.audio_context.NewPlayerF32(loop_ambient)
+	check(err)
+	ambient_snd.Play()
 	player.hurt_snd = g.LoadSoundPlayer("hurt.wav")
 	player.death_snd = g.LoadSoundPlayer("death.wav")
 
