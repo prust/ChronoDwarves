@@ -79,14 +79,15 @@ var (
 	is_cam_reset    bool
 	show_hitboxes   bool
 	tick            int // tick starts at 0, increments 60x/sec, and resets to 0 when you go back in time
-	shockwave_dist  float64
 	shockwave_snd   *audio.Player
 	slime_giant_snd *audio.Player
 	slime_wall_snd  *audio.Player
-	red             = color.RGBA{R: 255, G: 0, B: 0, A: 255}
-	blue            = color.RGBA{R: 0, G: 0, B: 255, A: 255}
+	red             = color.RGBA{R: 255, G: 0, B: 0, A: 100}
+	blue            = color.RGBA{R: 0, G: 0, B: 255, A: 100}
+	see_thru_blue   = color.RGBA{R: 0, G: 0, B: 255, A: 10}
 	tag_wall        = resolv.NewTag("wall")
 	tag_giant       = resolv.NewTag("giant")
+	shockwave_dist  = float64(grid_size * 15)
 )
 
 type Game struct {
@@ -104,7 +105,7 @@ type Game struct {
 	slimes            []*Slime
 	timer_system      *et.TimerSystem
 	los_lines         []Line // line-of-sight lines, for display
-	shock_line        *Line
+	shock_circle      bool
 }
 
 // set volume based on nearness of the player, max_dist cells away = 0%, 0 cells away = 100%
@@ -446,16 +447,16 @@ func (g *Game) Update() error {
 			shockwave_snd.Play()
 
 			cam.AddTrauma(0.5)
+			g.shock_circle = true
+			g.timer_system.AfterDuration(300*time.Millisecond, func(_ *et.Timer, _ int) et.FinishMode {
+				g.shock_circle = false
+				return et.FinishEnd
+			})
+
 			for _, self := range g.selves {
 				if self.health > 0 {
-					walls := g.space.FilterShapes().ByTags(tag_wall)
-					line_test_settings := resolv.LineTestSettings{Start: g.giant.rect.Position(), End: self.rect.Position(), TestAgainst: walls, OnIntersect: onLineIntersectDiscontinue}
-					if !resolv.LineTest(line_test_settings) {
-						g.shock_line = &Line{x1: g.giant.rect.Position().X, y1: g.giant.rect.Position().Y, x2: self.rect.Position().X, y2: self.rect.Position().Y}
-						g.timer_system.AfterDuration(300*time.Millisecond, func(_ *et.Timer, _ int) et.FinishMode {
-							g.shock_line = nil
-							return et.FinishEnd
-						})
+					dist := g.giant.rect.DistanceTo(self.rect)
+					if dist < shockwave_dist {
 						self.TakeDamage(giant_damage)
 					}
 				}
@@ -508,6 +509,10 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		op.GeoM.Reset()
 		op.GeoM.Translate(g.giant.x, g.giant.y)
 		cam.Draw(g.giant_anim.Frame(), op, screen)
+		x, y := cam.ApplyCameraTransformToPoint(g.giant.rect.Position().X, g.giant.rect.Position().Y)
+		if g.shock_circle {
+			vector.FillCircle(screen, float32(x), float32(y), float32(shockwave_dist), see_thru_blue, false)
+		}
 	}
 
 	for _, player := range g.selves {
@@ -529,9 +534,6 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	// line-of-sight lines & shock lines
 	for _, line := range g.los_lines {
 		drawLine(line.x1, line.y1, line.x2, line.y2, red, cam, screen)
-	}
-	if g.shock_line != nil {
-		drawLine(g.shock_line.x1, g.shock_line.y1, g.shock_line.x2, g.shock_line.y2, blue, cam, screen)
 	}
 
 	for _, slime := range g.slimes {
@@ -651,12 +653,6 @@ func main() {
 	cam.SmoothOptions.SmoothDampMaxSpeedX = 2500
 	cam.SmoothOptions.SmoothDampTimeY = 0.12
 	cam.SmoothOptions.SmoothDampMaxSpeedY = 2500
-
-	// calc shockwave dist as the dist in world coords from the top of the screen to the bottom of the screen
-	// (avoid using isOnScreen() for shockwave dist, because it only works for the current self, not past selves)
-	x1, y1 := cam.ScreenToWorld(0, 0)
-	x2, y2 := cam.ScreenToWorld(0, screen_h)
-	shockwave_dist = distance(x1, y1, x2, y2)
 
 	if err := ebiten.RunGame(g); err != nil {
 		log.Fatal(err)
