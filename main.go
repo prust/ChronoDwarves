@@ -39,7 +39,7 @@ const (
 
 	sample_rate  = 48000
 	anim_rate    = time.Second / 8 // 8fps pixel art animation (looping 3-frame walk cycles)
-	player_speed = 4
+	player_speed = 3
 	player_w     = 16
 	player_h     = 32
 	giant_w      = 48
@@ -49,8 +49,8 @@ const (
 	window_h     = 768
 	screen_w     = window_w / 4
 	screen_h     = window_h / 4
-	map_w        = 100
-	map_h        = 100
+	map_w        = 50
+	map_h        = 50
 )
 
 var (
