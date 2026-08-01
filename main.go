@@ -426,7 +426,7 @@ func initPlayer(g *Game) *Player {
 	player.y = player.start_y * grid_size
 
 	// player hitbox is smaller than the frame
-	player.rect = resolv.NewRectangleFromTopLeft(player.x+2, player.y+11, 11, 19)
+	player.rect = resolv.NewRectangleFromTopLeft(player.x+2, player.y+11, 11, 20)
 	g.space.Add(player.rect)
 
 	walk_wav := loadWav("walk.wav")
