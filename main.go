@@ -143,11 +143,7 @@ func (g *Game) LoadSoundPlayer(filename string) *audio.Player {
 func (g *Game) ResetSlimesOnMap() {
 	for range num_slimes_on_map {
 		x, y := findEmptyCells(1, 1, g.rng)
-		slime := &Slime{x: float64(x * grid_size), y: float64(y * grid_size)}
-		slime.rect = resolv.NewRectangleFromTopLeft(slime.x, slime.y, slime_w, slime_h)
-		slime.rect.Tags().Set(tag_collectible)
-		g.space.Add(slime.rect)
-		g.slimes = append(g.slimes, slime)
+		g.SpawnNewSlime(float64(x * grid_size), float64(y * grid_size))
 	}
 }
 
@@ -174,6 +170,15 @@ type Player struct {
 	num_slimes     int
 }
 
+func (g *Game) SpawnNewSlime(x, y float64) {
+	slime := &Slime{x: x, y: y}
+	slime.rect = resolv.NewRectangleFromTopLeft(slime.x, slime.y, slime_w, slime_h)
+	slime.rect.Tags().Set(tag_collectible)
+	g.space.Add(slime.rect)
+	g.slimes = append(g.slimes, slime)
+
+}
+
 func (self *Player) TakeDamage(damage int, g *Game) {
 	self.health -= damage
 	var sound *audio.Player
@@ -181,13 +186,12 @@ func (self *Player) TakeDamage(damage int, g *Game) {
 		sound = self.death_snd
 		self.dx = 0
 		self.dy = 0
-		x := self.rect.Center().X
-		y := self.rect.Center().Y
-		slime := &Slime{x: x, y: y}
-		slime.rect = resolv.NewRectangleFromTopLeft(slime.x, slime.y, slime_w, slime_h)
-		slime.rect.Tags().Set(tag_collectible)
-		g.space.Add(slime.rect)
-		g.slimes = append(g.slimes, slime)
+		for range self.num_slimes + 1 {
+			x := self.rect.Center().X + rand.Float64()*20 - 10
+			y := self.rect.Center().Y + rand.Float64()*20 - 10
+			g.SpawnNewSlime(x, y)
+
+		}
 	} else {
 		sound = self.hurt_snd
 	}
