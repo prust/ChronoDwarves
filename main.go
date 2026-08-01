@@ -71,6 +71,7 @@ var (
 	hist_actions   = [num_hist_actions]input.Action{action_left, action_right, action_up, action_down, action_throw_slime}
 	cam            *kamera.Camera
 	game_map       *dngn.Layout
+	character_img  *ebiten.Image
 	wall_img       *ebiten.Image
 	door_img       *ebiten.Image
 	floor_img      *ebiten.Image
@@ -86,8 +87,7 @@ var (
 )
 
 type Game struct {
-	selves            []*Player            // past selves & current self
-	player_anim       [4]*ganim8.Animation // an animation for each of the 4 directions
+	selves            []*Player // past selves & current self
 	player_death_anim *ganim8.Animation
 	giant             *Giant
 	giant_anim        *ganim8.Animation // one animation for the giant's shockwave punch
@@ -136,6 +136,7 @@ type Player struct {
 	hist_ix    int                    // index of the next input history point during a replay
 	is_pressed [num_hist_actions]bool // track state of currently-pressed actions
 	health     int
+	walk_anim  [4]*ganim8.Animation // an animation for each of the 4 directions
 }
 
 func (self *Player) TakeDamage(damage int) {
@@ -361,7 +362,7 @@ func (g *Game) Update() error {
 			self.walk_snd.Play()
 		} else if was_walking && !is_walking {
 			self.walk_snd.Pause()
-			g.player_anim[self.dir].GoToFrame(2)
+			self.walk_anim[self.dir].GoToFrame(2)
 		}
 
 		if hist_point.just_released[action_throw_slime] {
@@ -375,7 +376,7 @@ func (g *Game) Update() error {
 		}
 
 		if is_walking {
-			g.player_anim[self.dir].Update()
+			self.walk_anim[self.dir].Update()
 		}
 
 		if is_current_self {
@@ -490,7 +491,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	for _, player := range g.selves {
 		var anim *ganim8.Animation
 		if player.health > 0 {
-			anim = g.player_anim[player.dir]
+			anim = player.walk_anim[player.dir]
 		} else {
 			anim = g.player_death_anim
 		}
@@ -566,7 +567,7 @@ func main() {
 	}
 
 	// load images/spritesheets
-	var character_img = loadImg("dwarf_character.png")
+	character_img = loadImg("dwarf_character.png")
 	wall_img = loadImg("wall.png")
 	door_img = loadImg("door.png")
 	floor_img = loadImg("floor.png")
@@ -597,10 +598,6 @@ func main() {
 
 	// 3 frame columns and 5 frame rows
 	g_pl := ganim8.NewGrid(player_w, player_h, player_w*3, player_h*5)
-	g.player_anim[0] = ganim8.New(character_img, g_pl.Frames("1-3", 1), anim_rate)
-	g.player_anim[1] = ganim8.New(character_img, g_pl.Frames("1-3", 2), anim_rate)
-	g.player_anim[2] = ganim8.New(character_img, g_pl.Frames("1-3", 3), anim_rate)
-	g.player_anim[3] = ganim8.New(character_img, g_pl.Frames("1-3", 4), anim_rate)
 	g.player_death_anim = ganim8.New(character_img, g_pl.Frames(1, 5), anim_rate)
 
 	giant_img := loadImg("giant.png")
@@ -664,6 +661,12 @@ func initPlayer(g *Game) *Player {
 	death_wav := loadWav("death.wav")
 	player.death_snd, err = g.audio_context.NewPlayerF32(death_wav)
 	check(err)
+
+	g_pl := ganim8.NewGrid(player_w, player_h, player_w*3, player_h*5)
+	player.walk_anim[0] = ganim8.New(character_img, g_pl.Frames("1-3", 1), anim_rate)
+	player.walk_anim[1] = ganim8.New(character_img, g_pl.Frames("1-3", 2), anim_rate)
+	player.walk_anim[2] = ganim8.New(character_img, g_pl.Frames("1-3", 3), anim_rate)
+	player.walk_anim[3] = ganim8.New(character_img, g_pl.Frames("1-3", 4), anim_rate)
 
 	return player
 }
