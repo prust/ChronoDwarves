@@ -60,8 +60,8 @@ const (
 	window_h               = 768
 	screen_w               = window_w / 4
 	screen_h               = window_h / 4
-	map_w                  = 20
-	map_h                  = 20
+	map_w                  = 50
+	map_h                  = 50
 	min_shockwave_delay_ms = 1000
 	max_shockwave_delay_ms = 3000
 	player_start_health    = 8
@@ -79,6 +79,7 @@ var (
 	show_hitboxes  bool
 	tick           int // tick starts at 0, increments 60x/sec, and resets to 0 when you go back in time
 	shockwave_dist float64
+	shockwave_snd  *audio.Player
 	red            = color.RGBA{R: 255, G: 0, B: 0, A: 255}
 	tag_wall       = resolv.NewTag("wall")
 	tag_giant      = resolv.NewTag("giant")
@@ -102,38 +103,54 @@ type Game struct {
 	los_lines         []Line // line-of-sight lines, for display
 }
 
+// set volume based on nearness of the player, max_dist cells away = 0%, 0 cells away = 100%
+func (g *Game) VolumeByPlayerDist(rect *resolv.ConvexPolygon, max_dist int, max_vol float64) float64 {
+	max_dist_px := float64(max_dist * grid_size)
+
+	curr_self := g.selves[len(g.selves)-1]
+	dist := distance(curr_self.x, curr_self.y, rect.Position().X, rect.Position().Y)
+	if dist > max_dist_px {
+		return 0
+	} else {
+		pct_of_max_dist := dist / max_dist_px
+		inverse_pct := 1 - pct_of_max_dist
+		return inverse_pct * max_vol
+	}
+}
+
 // each "past self" of a player is a separate Player instance
 // with a separate starting position, input history, current position, etc
 type Player struct {
-	start_x     float64 // start pos in cell coordinates (not in px)
-	start_y     float64
-	x           float64 // curr pos in px
-	y           float64
-	dx          float64 // delta position (velocity)
-	dy          float64
-	rect        *resolv.ConvexPolygon // DRY violation w/ x,y -- should we solely use the collision lib rect?
-	dir         int                   // direction player is facing (indexes the animation array)
-	walk_sound  *audio.Player
-	hurt_sound  *audio.Player
-	death_sound *audio.Player
-	history     []InputHistoryPoint    // condensed array of input history
-	hist_ix     int                    // index of the next input history point during a replay
-	is_pressed  [num_hist_actions]bool // track state of currently-pressed actions
-	health      int
+	start_x    float64 // start pos in cell coordinates (not in px)
+	start_y    float64
+	x          float64 // curr pos in px
+	y          float64
+	dx         float64 // delta position (velocity)
+	dy         float64
+	rect       *resolv.ConvexPolygon // DRY violation w/ x,y -- should we solely use the collision lib rect?
+	dir        int                   // direction player is facing (indexes the animation array)
+	walk_snd   *audio.Player
+	hurt_snd   *audio.Player
+	death_snd  *audio.Player
+	history    []InputHistoryPoint    // condensed array of input history
+	hist_ix    int                    // index of the next input history point during a replay
+	is_pressed [num_hist_actions]bool // track state of currently-pressed actions
+	health     int
 }
 
 func (self *Player) TakeDamage(damage int) {
 	self.health -= damage
-	var sound *audio.Player
+	// var sound *audio.Player
 	if self.health <= 0 {
-		sound = self.death_sound
+		// sound = self.death_snd
 		self.dx = 0
 		self.dy = 0
-	} else {
-		sound = self.hurt_sound
 	}
-	sound.Rewind()
-	sound.Play()
+	// else {
+	// 	sound = self.hurt_snd
+	// }
+	// sound.Rewind()
+	// sound.Play()
 	fmt.Println("Ouch!")
 }
 
@@ -201,9 +218,9 @@ func (g *Game) Update() error {
 			self.x, self.y = new_x, new_y
 
 			// drop past-selves volume, so your current self's volume is most prominent
-			self.walk_sound.SetVolume(0.25)
-			self.hurt_sound.SetVolume(0.25)
-			self.death_sound.SetVolume(0.25)
+			self.walk_snd.SetVolume(0.25)
+			self.hurt_snd.SetVolume(0.25)
+			self.death_snd.SetVolume(0.25)
 
 			self.hist_ix = 0
 		}
@@ -341,10 +358,10 @@ func (g *Game) Update() error {
 		}
 
 		if !was_walking && is_walking {
-			self.walk_sound.Rewind()
-			self.walk_sound.Play()
+			self.walk_snd.Rewind()
+			self.walk_snd.Play()
 		} else if was_walking && !is_walking {
-			self.walk_sound.Pause()
+			self.walk_snd.Pause()
 			g.player_anim[self.dir].GoToFrame(2)
 		}
 
@@ -406,6 +423,11 @@ func (g *Game) Update() error {
 
 		g.giant_anim.Update()
 		if g.giant.shockwave_punch && g.giant_anim.Position() == shockwave_frame {
+			vol_pct := g.VolumeByPlayerDist(g.giant.rect, map_h, 0.5)
+			shockwave_snd.SetVolume(vol_pct)
+			shockwave_snd.Rewind()
+			shockwave_snd.Play()
+
 			cam.AddTrauma(0.5)
 			for _, self := range g.selves {
 				if self.health > 0 {
@@ -563,8 +585,14 @@ func main() {
 		action_time_travel: {input.KeyT},
 		action_throw_slime: {input.KeyMouseLeft},
 	}
-	g.player_input = g.input_system.NewHandler(0, keymap)
+
+	var err error
 	g.audio_context = audio.NewContext(sample_rate)
+	shockwave_wav := loadWav("shockwave.wav")
+	shockwave_snd, err = g.audio_context.NewPlayerF32(shockwave_wav)
+	check(err)
+
+	g.player_input = g.input_system.NewHandler(0, keymap)
 	player := initPlayer(g)
 	g.selves = append(g.selves, player)
 
@@ -629,13 +657,13 @@ func initPlayer(g *Game) *Player {
 	walk_wav := loadWav("walk.wav")
 	loop_walk := audio.NewInfiniteLoop(walk_wav, walk_wav.Length())
 	var err error
-	player.walk_sound, err = g.audio_context.NewPlayerF32(loop_walk)
+	player.walk_snd, err = g.audio_context.NewPlayerF32(loop_walk)
 	check(err)
 	hurt_wav := loadWav("hurt.wav")
-	player.hurt_sound, err = g.audio_context.NewPlayerF32(hurt_wav)
+	player.hurt_snd, err = g.audio_context.NewPlayerF32(hurt_wav)
 	check(err)
 	death_wav := loadWav("death.wav")
-	player.death_sound, err = g.audio_context.NewPlayerF32(death_wav)
+	player.death_snd, err = g.audio_context.NewPlayerF32(death_wav)
 	check(err)
 
 	return player
