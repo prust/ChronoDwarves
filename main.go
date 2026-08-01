@@ -170,14 +170,16 @@ func (g *Game) Update() error {
 		is_current_self := ix == len(g.selves)-1
 		is_past_self := !is_current_self
 
-		if g.player_input.ActionIsJustPressed(action_time_travel) {
+		if is_past_self && g.player_input.ActionIsJustPressed(action_time_travel) {
 			self.health = player_start_health
-			self.x = self.start_x * grid_size
-			self.y = self.start_y * grid_size
+			new_x := self.start_x * grid_size
+			new_y := self.start_y * grid_size
 
-			// the "position" in resolv is the *center* of the player, not the top-left
-			// so we need to compensate
-			self.rect.SetPosition(self.x+(player_w/2), self.y+(player_h/2))
+			// we can't simply call SetPosition(center_x, center_y) adjusted with player.w/2 & player.h/2
+			// because our player hitbox isn't exactly the same shape as the player image (player.w/player.h)
+			self.rect.Move(new_x-self.x, new_y-self.y)
+			self.x, self.y = new_x, new_y
+
 			self.hist_ix = 0
 		}
 
