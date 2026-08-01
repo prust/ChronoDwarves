@@ -73,6 +73,7 @@ var (
 	tick          int // tick starts at 0, increments 60x/sec, and resets to 0 when you go back in time
 	red           = color.RGBA{R: 255, G: 0, B: 0, A: 255}
 	tag_wall      = resolv.NewTag("wall")
+	tag_giant     = resolv.NewTag("giant")
 )
 
 type Game struct {
@@ -117,9 +118,10 @@ type InputHistoryPoint struct {
 }
 
 type Giant struct {
-	x    float64
-	y    float64
-	rect *resolv.ConvexPolygon
+	health int
+	x      float64
+	y      float64
+	rect   *resolv.ConvexPolygon
 }
 
 type Slime struct {
@@ -308,8 +310,14 @@ func (g *Game) Update() error {
 		slime.rect.Move(slime.dx, slime.dy)
 		near_shapes := slime.rect.SelectTouchingCells(4).FilterShapes()
 		slime.rect.IntersectionTest(resolv.IntersectionTestSettings{
-			TestAgainst: near_shapes.ByTags(tag_wall),
+			TestAgainst: near_shapes.ByTags(tag_wall | tag_giant),
 			OnIntersect: func(set resolv.IntersectionSet) bool {
+				if set.OtherShape.Tags().Has(tag_giant) {
+					g.giant.health--
+					if g.giant.health == 0 {
+						g.space.Remove(g.giant.rect)
+					}
+				}
 				g.slimes = slices.Delete(g.slimes, i, i+1)
 				g.space.Remove(slime.rect)
 				return false
@@ -357,9 +365,11 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		drawHitbox(g.giant.rect, cam, screen)
 	}
 
-	op.GeoM.Reset()
-	op.GeoM.Translate(g.giant.x, g.giant.y)
-	cam.Draw(giant_img, op, screen)
+	if g.giant.health > 0 {
+		op.GeoM.Reset()
+		op.GeoM.Translate(g.giant.x, g.giant.y)
+		cam.Draw(giant_img, op, screen)
+	}
 
 	for _, player := range g.selves {
 		op.GeoM.Reset()
@@ -459,9 +469,10 @@ func main() {
 	g.player_anim[2] = ganim8.New(character_img, g32.Frames("1-3", 3), anim_rate)
 	g.player_anim[3] = ganim8.New(character_img, g32.Frames("1-3", 4), anim_rate)
 
-	g.giant = &Giant{}
+	g.giant = &Giant{health: 10}
 	g.giant.x, g.giant.y = findEmptyCells(giant_w/grid_size, giant_h/grid_size)
-	g.giant.rect = resolv.NewRectangleFromTopLeft(g.giant.x+3, g.giant.y+20, giant_w-4, giant_h-22)
+	g.giant.rect = resolv.NewRectangleFromTopLeft(g.giant.x+3, g.giant.y+16, giant_w-4, giant_h-18)
+	g.giant.rect.Tags().Set(tag_giant)
 	g.space.Add(g.giant.rect)
 
 	cam = kamera.NewCamera(player.x, player.y, float64(g.screen_w), float64(g.screen_h))
