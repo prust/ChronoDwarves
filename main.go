@@ -42,6 +42,7 @@ const (
 	sample_rate  = 48000
 	anim_rate    = time.Second / 8 // 8fps pixel art animation (looping 3-frame walk cycles)
 	player_speed = 4
+	throw_speed  = 5
 	player_w     = 16
 	player_h     = 32
 	giant_w      = 48
@@ -106,6 +107,8 @@ type InputHistoryPoint struct {
 	tick          int
 	just_pressed  [num_hist_actions]bool
 	just_released [num_hist_actions]bool
+	mouse_x       float64
+	mouse_y       float64
 }
 
 type Giant struct {
@@ -117,17 +120,17 @@ type Giant struct {
 type Slime struct {
 	x    float64
 	y    float64
+	dx   float64
+	dy   float64
 	rect *resolv.ConvexPolygon
 }
 
-func (p *Player) NormalizeVelocity() {
-	length_squared := math.Sqrt(p.dx*p.dx + p.dy*p.dy)
-	if length_squared == 0 {
-		return
-	} else {
-		p.dx *= player_speed / length_squared
-		p.dy *= player_speed / length_squared
+func normalizeVector(x float64, y float64, desired_len float64) (float64, float64) {
+	curr_len := math.Sqrt(x*x + y*y)
+	if curr_len == 0 {
+		return 0, 0
 	}
+	return x * desired_len / curr_len, y * desired_len / curr_len
 }
 
 func (g *Game) Update() error {
@@ -139,6 +142,7 @@ func (g *Game) Update() error {
 
 	if g.player_input.ActionIsJustPressed(action_time_travel) {
 		tick = 0
+		g.slimes = g.slimes[:0]
 		g.selves = append(g.selves, initPlayer(g))
 	}
 
@@ -185,6 +189,10 @@ func (g *Game) Update() error {
 					input_changed = true
 				}
 			}
+			if hist_point.just_released[action_throw_slime] {
+				info, _ := g.player_input.JustReleasedActionInfo(action_throw_slime)
+				hist_point.mouse_x, hist_point.mouse_y = cam.ScreenToWorld(int(info.Pos.X), int(info.Pos.Y))
+			}
 			if input_changed {
 				self.history = append(self.history, hist_point)
 			}
@@ -216,7 +224,7 @@ func (g *Game) Update() error {
 		}
 		is_walking := self.dx != 0 || self.dy != 0
 
-		self.NormalizeVelocity()
+		self.dx, self.dy = normalizeVector(self.dx, self.dy, player_speed)
 
 		self.x += self.dx
 		self.y += self.dy
@@ -265,6 +273,14 @@ func (g *Game) Update() error {
 			g.player_anim[self.dir].GoToFrame(2)
 		}
 
+		if hist_point.just_released[action_throw_slime] {
+			slime := &Slime{x: self.x + player_w/2, y: self.y + player_h/2}
+			throw_vec_x := hist_point.mouse_x - slime.x
+			throw_vec_y := hist_point.mouse_y - slime.y
+			slime.dx, slime.dy = normalizeVector(throw_vec_x, throw_vec_y, throw_speed)
+			g.slimes = append(g.slimes, slime)
+		}
+
 		if is_walking {
 			g.player_anim[self.dir].Update()
 		}
@@ -276,6 +292,11 @@ func (g *Game) Update() error {
 				cam.LookAt(float64(self.x), float64(self.y))
 			}
 		}
+	}
+
+	for _, slime := range g.slimes {
+		slime.x += slime.dx
+		slime.y += slime.dy
 	}
 
 	tick++
@@ -329,6 +350,12 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		if show_hitboxes {
 			drawHitbox(player.rect, cam, screen)
 		}
+	}
+
+	for _, slime := range g.slimes {
+		op.GeoM.Reset()
+		op.GeoM.Translate(slime.x, slime.y)
+		cam.Draw(slime_img, op, screen)
 	}
 }
 
