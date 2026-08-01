@@ -8,6 +8,7 @@ import (
 	"log"
 	"math"
 	"math/rand/v2"
+	"slices"
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -47,6 +48,8 @@ const (
 	player_h     = 32
 	giant_w      = 48
 	giant_h      = 64
+	slime_w      = 4
+	slime_h      = 4
 	grid_size    = 16
 	window_w     = 1024
 	window_h     = 768
@@ -275,6 +278,8 @@ func (g *Game) Update() error {
 
 		if hist_point.just_released[action_throw_slime] {
 			slime := &Slime{x: self.x + player_w/2, y: self.y + player_h/2}
+			slime.rect = resolv.NewRectangleFromTopLeft(slime.x, slime.y, slime_w, slime_h)
+			g.space.Add(slime.rect)
 			throw_vec_x := hist_point.mouse_x - slime.x
 			throw_vec_y := hist_point.mouse_y - slime.y
 			slime.dx, slime.dy = normalizeVector(throw_vec_x, throw_vec_y, throw_speed)
@@ -294,9 +299,20 @@ func (g *Game) Update() error {
 		}
 	}
 
-	for _, slime := range g.slimes {
+	// iterate backwards so we can safely remove them w/out messing up iteration
+	for i, slime := range slices.Backward(g.slimes) {
 		slime.x += slime.dx
 		slime.y += slime.dy
+		slime.rect.Move(slime.dx, slime.dy)
+		near_shapes := slime.rect.SelectTouchingCells(4).FilterShapes()
+		slime.rect.IntersectionTest(resolv.IntersectionTestSettings{
+			TestAgainst: near_shapes.ByTags(tag_wall),
+			OnIntersect: func(set resolv.IntersectionSet) bool {
+				g.slimes = slices.Delete(g.slimes, i, i+1)
+				g.space.Remove(slime.rect)
+				return false
+			},
+		})
 	}
 
 	tick++
