@@ -42,6 +42,8 @@ const (
 	player_speed = 4
 	player_w     = 16
 	player_h     = 32
+	giant_w      = 48
+	giant_h      = 64
 	grid_size    = 16
 	window_w     = 1024
 	window_h     = 768
@@ -56,6 +58,7 @@ var (
 	wall_img      *ebiten.Image
 	door_img      *ebiten.Image
 	floor_img     *ebiten.Image
+	giant_img     *ebiten.Image
 	is_cam_reset  bool
 	show_hitboxes bool
 	tick          int // tick starts at 0, increments 60x/sec, and resets to 0 when you go back in time
@@ -66,6 +69,7 @@ var (
 type Game struct {
 	selves        []*Player            // past selves & current self
 	player_anim   [4]*ganim8.Animation // an animation for each of the 4 directions
+	giant         *Giant
 	screen_w      int
 	screen_h      int
 	input_system  input.System
@@ -98,6 +102,11 @@ type InputHistoryPoint struct {
 	tick          int
 	just_pressed  [4]bool
 	just_released [4]bool
+}
+
+type Giant struct {
+	x float64
+	y float64
 }
 
 func (p *Player) NormalizeVelocity() {
@@ -297,9 +306,13 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		}
 	}
 
+	op.GeoM.Reset()
+	op.GeoM.Translate(g.giant.x, g.giant.y)
+	cam.Draw(giant_img, op, screen)
+
 	for _, player := range g.selves {
 		op.GeoM.Reset()
-		op.GeoM.Translate(float64(player.x), float64(player.y))
+		op.GeoM.Translate(player.x, player.y)
 		cam.Draw(g.player_anim[player.dir].Frame(), op, screen)
 
 		if show_hitboxes {
@@ -360,6 +373,7 @@ func main() {
 	wall_img = loadImg("wall.png")
 	door_img = loadImg("door.png")
 	floor_img = loadImg("floor.png")
+	giant_img = loadImg("giant.png")
 
 	// initialize input system
 	g.input_system.Init(input.SystemConfig{DevicesEnabled: input.AnyDevice})
@@ -384,6 +398,9 @@ func main() {
 	g.player_anim[2] = ganim8.New(character_img, g32.Frames("1-3", 3), anim_rate)
 	g.player_anim[3] = ganim8.New(character_img, g32.Frames("1-3", 4), anim_rate)
 
+	g.giant = &Giant{}
+	g.giant.x, g.giant.y = findEmptyCells(giant_w/grid_size, giant_h/grid_size)
+
 	cam = kamera.NewCamera(player.x, player.y, float64(g.screen_w), float64(g.screen_h))
 	cam.ShakeEnabled = true
 	cam.SmoothType = kamera.SmoothDamp
@@ -397,22 +414,7 @@ func main() {
 func initPlayer(g *Game) *Player {
 	player := &Player{}
 
-	// find a random, empty space in the map to spawn the player
-	for _ = range 1000 {
-		x := rand.IntN(100)
-		y := rand.IntN(100)
-		// ensure the cell & the one below (since the player is 2 cells high) are empty
-		// disallow the 0,0 coordinate b/c we can't differentiate it from uninitialized vars
-		if (x != 0 || y != 0) && game_map.Get(x, y) == ' ' && game_map.Get(x, y) == ' ' {
-			player.start_x = float64(x)
-			player.start_y = float64(y)
-			break
-		}
-	}
-	if player.start_x == 0 && player.start_y == 0 {
-		panic("Unable to find an empty pair of cells to spawn player after 1000 tries")
-	}
-
+	player.start_x, player.start_y = findEmptyCells(player_w/grid_size, player_h/grid_size)
 	player.x = player.start_x * grid_size
 	player.y = player.start_y * grid_size
 
@@ -427,6 +429,29 @@ func initPlayer(g *Game) *Player {
 	check(err)
 
 	return player
+}
+
+// pass the # of adjacent empty cells needed (1 wide x 2 high for a player)
+func findEmptyCells(width int, height int) (float64, float64) {
+	// find a random, empty space in the map
+	for _ = range 1000 {
+		x := rand.IntN(100)
+		y := rand.IntN(100)
+
+		// ensure the requested range of cells are all empty
+		all_are_empty := true
+		for w := range width {
+			for h := range height {
+				if game_map.Get(x+w, y+h) != ' ' {
+					all_are_empty = false
+				}
+			}
+		}
+		if all_are_empty {
+			return float64(x), float64(y)
+		}
+	}
+	panic("Unable to find an empty pair of cells to spawn player after 1000 tries")
 }
 
 // wav files shouldn't be closed here b/c audio.Player manages stream state
