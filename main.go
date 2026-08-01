@@ -261,11 +261,13 @@ func (g *Game) Update() error {
 			self.x, self.y = new_x, new_y
 
 			// drop past-selves volume, so your current self's volume is most prominent
-			self.walk_snd.SetVolume(0.25)
-			self.hurt_snd.SetVolume(0.25)
-			self.death_snd.SetVolume(0.25)
+			self.walk_snd.SetVolume(0.15)
+			self.hurt_snd.SetVolume(0.15)
+			self.death_snd.SetVolume(0.15)
 
 			self.hist_ix = 0
+			self.is_pressed = [num_hist_actions]bool{false, false, false, false, false}
+			self.num_slimes = 0
 		}
 
 		was_walking := self.dx != 0 || self.dy != 0
@@ -493,7 +495,7 @@ func (g *Game) Update() error {
 
 	if g.giant.health > 0 {
 		if g.giant.shockwave_timer == nil {
-			delay := randomMS(min_shockwave_delay_ms, max_shockwave_delay_ms)
+			delay := randomMS(min_shockwave_delay_ms, max_shockwave_delay_ms, g.rng)
 			g.giant.shockwave_timer = g.timer_system.AfterDuration(delay, func(_ *et.Timer, _ int) et.FinishMode {
 				g.giant.shockwave_punch = true
 				g.giant_anim.Resume()
@@ -823,8 +825,8 @@ func isRectangleOverlap(x1 float64, y1 float64, x2 float64, y2 float64, x3 float
 	return true
 }
 
-func randomMS(min int, max int) time.Duration {
-	return time.Duration(rand.IntN(max-min)+min) * time.Millisecond
+func randomMS(min int, max int, rng *rand.Rand) time.Duration {
+	return time.Duration(rng.IntN(max-min)+min) * time.Millisecond
 }
 
 // drawRedRect() is for debugging purposes (takes world coordinates, translates to screen coords before drawing)
