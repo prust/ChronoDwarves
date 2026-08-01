@@ -20,7 +20,7 @@ Here are the steps:
 - Install go modules: `go mod tidy`
 - Run the game: `go run .`
 
-# How to (re)generate the WASM build (linux/unix):
+# How to (re)generate the web (WASM) build (linux/unix):
 
 ```
 env GOOS=js GOARCH=wasm go build -o ChronoDwarves.wasm github.com/prust/ChronoDwarves
