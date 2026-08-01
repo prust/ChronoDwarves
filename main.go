@@ -194,6 +194,15 @@ func (g *Game) Update() error {
 					self.hist_ix++ // advance to next history point
 				}
 			}
+			active_self := g.selves[len(g.selves)-1]
+			past_self_pos := self.rect.Center()
+			active_self_pos := active_self.rect.Center()
+
+			walls := g.space.FilterShapes().ByTags(tag_wall)
+			line_test_settings := resolv.LineTestSettings{Start: past_self_pos, End: active_self_pos, TestAgainst: walls, OnIntersect: onLineIntersectDiscontinue}
+			if !resolv.LineTest(line_test_settings) {
+				fmt.Println("Player Sighted!")
+			}
 		} else {
 			// "current" self
 			// store just pressed/released action in an input history point
@@ -642,6 +651,11 @@ func drawRedLine(x float64, y float64, x2 float64, y2 float64, cam *kamera.Camer
 	x, y = cam.ApplyCameraTransformToPoint(x, y)
 	x2, y2 = cam.ApplyCameraTransformToPoint(x2, y2)
 	vector.StrokeLine(screen, float32(x), float32(y), float32(x2), float32(y2), 1, red, false)
+}
+
+// boilerplate function that tells resolve to not continue after finding the first intersection
+func onLineIntersectDiscontinue(set resolv.IntersectionSet, index, max int) bool {
+	return false
 }
 
 func check(err error) {
