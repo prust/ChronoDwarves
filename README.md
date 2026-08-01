@@ -15,6 +15,8 @@ In addition to playing the game [online](https://prust.github.io/ChronoDwarves/)
 Here are the steps:
 
 - Download & install Go: https://go.dev/dl/
+- Download the code: `git clone https://github.com/prust/ChronoDwarves.git`
+- Change to the directory: `cd ChronoDwarves`
 - Install go modules: `go mod tidy`
 - Run the game: `go run .`
 
