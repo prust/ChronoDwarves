@@ -112,6 +112,9 @@ type Game struct {
 	timer_system      *et.TimerSystem
 	los_lines         []Line // line-of-sight lines, for display
 	shock_circle      bool
+	rng_seed1         uint64
+	rng_seed2         uint64
+	rng               *rand.Rand
 }
 
 // set volume based on nearness of the player, max_dist cells away = 0%, 0 cells away = 100%
@@ -135,6 +138,17 @@ func (g *Game) LoadSoundPlayer(filename string) *audio.Player {
 	snd_player, err := g.audio_context.NewPlayerF32(wav)
 	check(err)
 	return snd_player
+}
+
+func (g *Game) ResetSlimesOnMap() {
+	for range num_slimes_on_map {
+		x, y := findEmptyCells(1, 1, g.rng)
+		slime := &Slime{x: float64(x * grid_size), y: float64(y * grid_size)}
+		slime.rect = resolv.NewRectangleFromTopLeft(slime.x, slime.y, slime_w, slime_h)
+		slime.rect.Tags().Set(tag_collectible)
+		g.space.Add(slime.rect)
+		g.slimes = append(g.slimes, slime)
+	}
 }
 
 // each "past self" of a player is a separate Player instance
@@ -224,6 +238,11 @@ func (g *Game) Update() error {
 		g.giant.health = giant_start_health
 		g.slimes = g.slimes[:0]
 		g.selves = append(g.selves, initPlayer(g))
+
+		// reset the game's random number generator
+		source := rand.NewPCG(g.rng_seed1, g.rng_seed2)
+		g.rng = rand.New(source)
+		g.ResetSlimesOnMap()
 	}
 
 	for ix, self := range g.selves {
@@ -599,7 +618,11 @@ func main() {
 		screen_w:     screen_w,
 		screen_h:     screen_h,
 		timer_system: et.NewTimerSystem(),
+		rng_seed1:    rand.Uint64(),
+		rng_seed2:    rand.Uint64(),
 	}
+	source := rand.NewPCG(g.rng_seed1, g.rng_seed2)
+	g.rng = rand.New(source)
 
 	// generate map
 	game_map = dngn.NewLayout(map_w, map_h)
@@ -685,7 +708,7 @@ func main() {
 	g.giant_anim.Pause()
 
 	g.giant = &Giant{health: giant_start_health}
-	x, y := findEmptyCells(giant_w/grid_size, giant_h/grid_size)
+	x, y := findEmptyCells(giant_w/grid_size, giant_h/grid_size, nil)
 	g.giant.x, g.giant.y = float64(x*grid_size), float64(y*grid_size)
 	g.giant.rect = resolv.NewRectangleFromTopLeft(g.giant.x+3, g.giant.y+16, giant_w-4, giant_h-18)
 	g.giant.rect.Tags().Set(tag_giant)
@@ -705,15 +728,7 @@ func main() {
 	cam.SmoothOptions.SmoothDampTimeY = 0.12
 	cam.SmoothOptions.SmoothDampMaxSpeedY = 2500
 
-	for range num_slimes_on_map {
-		x, y := findEmptyCells(1, 1)
-		slime := &Slime{x: float64(x * grid_size), y: float64(y * grid_size)}
-		slime.rect = resolv.NewRectangleFromTopLeft(slime.x, slime.y, slime_w, slime_h)
-		slime.rect.Tags().Set(tag_collectible)
-		g.space.Add(slime.rect)
-		g.slimes = append(g.slimes, slime)
-	}
-
+	g.ResetSlimesOnMap()
 	if err := ebiten.RunGame(g); err != nil {
 		log.Fatal(err)
 	}
@@ -722,7 +737,7 @@ func main() {
 func initPlayer(g *Game) *Player {
 	player := &Player{health: player_start_health}
 
-	player.start_x, player.start_y = findEmptyCells(player_w/grid_size, player_h/grid_size)
+	player.start_x, player.start_y = findEmptyCells(player_w/grid_size, player_h/grid_size, nil)
 	player.x = float64(player.start_x * grid_size)
 	player.y = float64(player.start_y * grid_size)
 
@@ -749,11 +764,17 @@ func initPlayer(g *Game) *Player {
 }
 
 // pass the # of adjacent empty cells needed (1 wide x 2 high for a player)
-func findEmptyCells(width int, height int) (int, int) {
+func findEmptyCells(width int, height int, rng *rand.Rand) (int, int) {
 	// find a random, empty space in the map
 	for _ = range 1000 {
-		x := rand.IntN(map_w)
-		y := rand.IntN(map_h)
+		var x, y int
+		if rng != nil {
+			x = rng.IntN(map_w)
+			y = rng.IntN(map_h)
+		} else {
+			x = rand.IntN(map_w)
+			y = rand.IntN(map_h)
+		}
 
 		// ensure the requested range of cells are all empty
 		all_are_empty := true
