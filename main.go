@@ -87,7 +87,7 @@ var (
 	see_thru_blue   = color.RGBA{R: 0, G: 0, B: 255, A: 10}
 	tag_wall        = resolv.NewTag("wall")
 	tag_giant       = resolv.NewTag("giant")
-	shockwave_dist  = float64(grid_size * 15)
+	shockwave_dist  = float64(grid_size * 10)
 	throw_dist      = float64(grid_size * 5)
 )
 
