@@ -65,6 +65,7 @@ const (
 	min_shockwave_delay_ms = 1000
 	max_shockwave_delay_ms = 3000
 	player_start_health    = 8
+	giant_start_health     = 10
 )
 
 var (
@@ -217,6 +218,7 @@ func (g *Game) Update() error {
 
 	if g.player_input.ActionIsJustPressed(action_time_travel) {
 		tick = 0
+		g.giant.health = giant_start_health
 		g.slimes = g.slimes[:0]
 		g.selves = append(g.selves, initPlayer(g))
 	}
@@ -567,7 +569,7 @@ func (g *Game) Layout(outsideWidth, outsideHeight int) (screenWidth, screenHeigh
 
 func main() {
 	ebiten.SetWindowSize(window_w, window_h)
-	ebiten.SetWindowTitle("Ebitengine Template")
+	ebiten.SetWindowTitle("ChronoDwarves")
 
 	g := &Game{
 		screen_w:     screen_w,
@@ -658,7 +660,7 @@ func main() {
 	})
 	g.giant_anim.Pause()
 
-	g.giant = &Giant{health: 10}
+	g.giant = &Giant{health: giant_start_health}
 	g.giant.x, g.giant.y = findEmptyCells(giant_w/grid_size, giant_h/grid_size)
 	g.giant.rect = resolv.NewRectangleFromTopLeft(g.giant.x+3, g.giant.y+16, giant_w-4, giant_h-18)
 	g.giant.rect.Tags().Set(tag_giant)
