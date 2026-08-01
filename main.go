@@ -122,6 +122,21 @@ type Player struct {
 	health      int
 }
 
+func (self *Player) TakeDamage(damage int) {
+	self.health -= damage
+	var sound *audio.Player
+	if self.health <= 0 {
+		sound = self.death_sound
+		self.dx = 0
+		self.dy = 0
+	} else {
+		sound = self.hurt_sound
+	}
+	sound.Rewind()
+	sound.Play()
+	fmt.Println("Ouch!")
+}
+
 // the game's tick increments 60x/sec
 // but a history *point* is only recorded for a tick if the input changed
 type InputHistoryPoint struct {
@@ -227,16 +242,7 @@ func (g *Game) Update() error {
 							return et.FinishEnd
 						})
 
-						curr_self.health -= 1
-						cam.AddTrauma(0.5)
-						var sound *audio.Player
-						if curr_self.health <= 0 {
-							sound = curr_self.death_sound
-						} else {
-							sound = curr_self.hurt_sound
-						}
-						sound.Rewind()
-						sound.Play()
+						curr_self.TakeDamage(1)
 					}
 				}
 			}
@@ -403,16 +409,7 @@ func (g *Game) Update() error {
 			cam.AddTrauma(0.5)
 			for _, self := range g.selves {
 				if self.health > 0 && self.rect.DistanceTo(g.giant.rect) < shockwave_dist {
-					self.health -= giant_damage
-					var sound *audio.Player
-					if self.health <= 0 {
-						sound = self.death_sound
-					} else {
-						sound = self.hurt_sound
-					}
-					sound.Rewind()
-					sound.Play()
-					fmt.Println("Ouch!")
+					self.TakeDamage(giant_damage)
 				}
 			}
 			g.giant.shockwave_punch = false
