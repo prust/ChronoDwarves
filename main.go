@@ -51,6 +51,7 @@ const (
 	player_h               = 32
 	giant_w                = 48
 	giant_h                = 64
+	giant_damage           = 2
 	shockwave_frame        = 9 // the frame at which the giant strikes the ground
 	slime_w                = 4
 	slime_h                = 4
@@ -63,7 +64,7 @@ const (
 	map_h                  = 20
 	min_shockwave_delay_ms = 1000
 	max_shockwave_delay_ms = 3000
-	player_start_health    = 4
+	player_start_health    = 8
 )
 
 var (
@@ -194,14 +195,20 @@ func (g *Game) Update() error {
 					self.hist_ix++ // advance to next history point
 				}
 			}
-			active_self := g.selves[len(g.selves)-1]
-			past_self_pos := self.rect.Center()
-			active_self_pos := active_self.rect.Center()
 
-			walls := g.space.FilterShapes().ByTags(tag_wall)
-			line_test_settings := resolv.LineTestSettings{Start: past_self_pos, End: active_self_pos, TestAgainst: walls, OnIntersect: onLineIntersectDiscontinue}
-			if !resolv.LineTest(line_test_settings) {
-				fmt.Println("Player Sighted!")
+			// Assuming a target framerate of 60, this means the tick fires once every half second
+			if tick%30 == 0 {
+				active_self := g.selves[len(g.selves)-1]
+				past_self_pos := self.rect.Center()
+				active_self_pos := active_self.rect.Center()
+
+				walls := g.space.FilterShapes().ByTags(tag_wall)
+				line_test_settings := resolv.LineTestSettings{Start: past_self_pos, End: active_self_pos, TestAgainst: walls, OnIntersect: onLineIntersectDiscontinue}
+				if !resolv.LineTest(line_test_settings) {
+					active_self.health -= 1
+					fmt.Println("Past self sighted current self: time ouch!")
+					cam.AddTrauma(0.5)
+				}
 			}
 		} else {
 			// "current" self
@@ -366,7 +373,7 @@ func (g *Game) Update() error {
 		if g.giant.shockwave_punch && g.giant_anim.Position() == shockwave_frame {
 			if isOnScreen(g, g.giant.rect) {
 				curr_self := g.selves[len(g.selves)-1]
-				curr_self.health--
+				curr_self.health -= giant_damage
 				fmt.Println("Ouch!")
 			}
 			// TODO: on this frame, deliver damage to player if the player is still on-screen
@@ -535,7 +542,13 @@ func main() {
 	g.space.Add(g.giant.rect)
 
 	cam = kamera.NewCamera(player.x, player.y, float64(g.screen_w), float64(g.screen_h))
+	camera_shake_options := kamera.DefaultCameraShakeOptions()
+	camera_shake_options.Decay = 0.95
+	camera_shake_options.Noise.Frequency = 0.2
+	camera_shake_options.Noise.Lacunarity = 4.0
 	cam.ShakeEnabled = true
+	cam.ShakeOptions = camera_shake_options
+
 	cam.SmoothType = kamera.SmoothDamp
 	cam.SmoothOptions.SmoothDampTimeX = 0.12
 	cam.SmoothOptions.SmoothDampMaxSpeedX = 2500
