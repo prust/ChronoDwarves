@@ -183,24 +183,14 @@ func (g *Game) Update() error {
 				}
 			}
 			active_self := g.selves[len(g.selves)-1]
-			fmt.Println("Active self: ", active_self.rect.Center())
 			past_self_pos := self.rect.Center()
-			fmt.Println("Past self: ", past_self_pos)
 			active_self_pos := active_self.rect.Center()
 
-			shapes := make(resolv.ShapeCollection, 0, len(g.wall_rects)+1)
-
-			for _, shape := range append(g.wall_rects, active_self.rect) {
-				shapes = append(shapes, shape)
+			walls := g.space.FilterShapes().ByTags(tag_wall)
+			line_test_settings := resolv.LineTestSettings{Start: past_self_pos, End: active_self_pos, TestAgainst: walls, OnIntersect: onLineIntersectDiscontinue}
+			if !resolv.LineTest(line_test_settings) {
+				fmt.Println("Player Sighted!")
 			}
-
-			resolv.LineTest(resolv.LineTestSettings{Start: past_self_pos, End: active_self_pos, TestAgainst: shapes, OnIntersect: func(set resolv.IntersectionSet, index, max int) bool {
-				fmt.Println(set.Intersections[len(set.Intersections)-1])
-				if len(set.Intersections) == 1 {
-					fmt.Println("Player sighted")
-				}
-				return false
-			}})
 		} else {
 			// "current" self
 			// store just pressed/released action in an input history point
@@ -601,6 +591,11 @@ func drawRedLine(x float64, y float64, x2 float64, y2 float64, cam *kamera.Camer
 	x, y = cam.ApplyCameraTransformToPoint(x, y)
 	x2, y2 = cam.ApplyCameraTransformToPoint(x2, y2)
 	vector.StrokeLine(screen, float32(x), float32(y), float32(x2), float32(y2), 1, red, false)
+}
+
+// boilerplate function that tells resolve to not continue after finding the first intersection
+func onLineIntersectDiscontinue(set resolv.IntersectionSet, index, max int) bool {
+	return false
 }
 
 func check(err error) {
