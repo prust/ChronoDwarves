@@ -21,7 +21,7 @@ import (
 	input "github.com/quasilyte/ebitengine-input"
 	"github.com/setanarut/kamera/v2"
 	"github.com/solarlune/dngn"
-	"github.com/solarlune/ebitick"
+	et "github.com/solarlune/ebitick"
 	"github.com/solarlune/resolv"
 	"github.com/yohamta/ganim8/v2"
 )
@@ -98,7 +98,8 @@ type Game struct {
 	space             *resolv.Space
 	wall_rects        []*resolv.ConvexPolygon
 	slimes            []*Slime
-	timer_system      *ebitick.TimerSystem
+	timer_system      *et.TimerSystem
+	los_lines         []Line // line-of-sight lines, for display
 }
 
 // each "past self" of a player is a separate Player instance
@@ -137,7 +138,7 @@ type Giant struct {
 	y               float64
 	rect            *resolv.ConvexPolygon
 	shockwave_punch bool
-	shockwave_timer *ebitick.Timer
+	shockwave_timer *et.Timer
 }
 
 type Slime struct {
@@ -146,6 +147,13 @@ type Slime struct {
 	dx   float64
 	dy   float64
 	rect *resolv.ConvexPolygon
+}
+
+type Line struct {
+	x1 float64
+	y1 float64
+	x2 float64
+	y2 float64
 }
 
 func (g *Game) Update() error {
@@ -202,7 +210,7 @@ func (g *Game) Update() error {
 			// Assuming a target framerate of 60, this means the tick fires once every half second
 			if tick%30 == 0 {
 				curr_self := g.selves[len(g.selves)-1]
-				if curr_self.health > 0 {
+				if curr_self.health > 0 && self.health > 0 {
 					past_self_pos := self.rect.Center()
 					curr_self_pos := curr_self.rect.Center()
 
@@ -210,6 +218,15 @@ func (g *Game) Update() error {
 					line_test_settings := resolv.LineTestSettings{Start: past_self_pos, End: curr_self_pos, TestAgainst: walls, OnIntersect: onLineIntersectDiscontinue}
 					if !resolv.LineTest(line_test_settings) {
 						fmt.Println("Past self sighted current self: time ouch!")
+						line := Line{x1: past_self_pos.X, y1: past_self_pos.Y, x2: curr_self_pos.X, y2: curr_self_pos.Y}
+						g.los_lines = append(g.los_lines, line)
+						g.timer_system.AfterDuration(300*time.Millisecond, func(_ *et.Timer, _ int) et.FinishMode {
+							g.los_lines = slices.DeleteFunc(g.los_lines, func(l Line) bool {
+								return l == line
+							})
+							return et.FinishEnd
+						})
+
 						curr_self.health -= 1
 						cam.AddTrauma(0.5)
 						var sound *audio.Player
@@ -220,7 +237,6 @@ func (g *Game) Update() error {
 						}
 						sound.Rewind()
 						sound.Play()
-
 					}
 				}
 			}
@@ -374,17 +390,17 @@ func (g *Game) Update() error {
 	if g.giant.health > 0 {
 		if g.giant.shockwave_timer == nil {
 			delay := randomMS(min_shockwave_delay_ms, max_shockwave_delay_ms)
-			time.Millisecond.Milliseconds()
-			g.giant.shockwave_timer = g.timer_system.AfterDuration(delay, func(timer *ebitick.Timer, loopCount int) ebitick.FinishMode {
+			g.giant.shockwave_timer = g.timer_system.AfterDuration(delay, func(_ *et.Timer, _ int) et.FinishMode {
 				g.giant.shockwave_punch = true
 				g.giant_anim.Resume()
 				g.giant.shockwave_timer = nil
-				return ebitick.FinishEnd
+				return et.FinishEnd
 			})
 		}
 
 		g.giant_anim.Update()
 		if g.giant.shockwave_punch && g.giant_anim.Position() == shockwave_frame {
+			cam.AddTrauma(0.5)
 			for _, self := range g.selves {
 				if self.health > 0 && self.rect.DistanceTo(g.giant.rect) < shockwave_dist {
 					self.health -= giant_damage
@@ -399,7 +415,6 @@ func (g *Game) Update() error {
 					fmt.Println("Ouch!")
 				}
 			}
-			// TODO: on this frame, deliver damage to player if the player is still on-screen
 			g.giant.shockwave_punch = false
 		}
 	}
@@ -466,6 +481,11 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		}
 	}
 
+	// line-of-sight lines
+	for _, line := range g.los_lines {
+		drawRedLine(line.x1, line.y1, line.x2, line.y2, cam, screen)
+	}
+
 	for _, slime := range g.slimes {
 		op.GeoM.Reset()
 		op.GeoM.Translate(slime.x, slime.y)
@@ -484,7 +504,7 @@ func main() {
 	g := &Game{
 		screen_w:     screen_w,
 		screen_h:     screen_h,
-		timer_system: ebitick.NewTimerSystem(),
+		timer_system: et.NewTimerSystem(),
 	}
 
 	// generate map
