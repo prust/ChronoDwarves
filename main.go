@@ -66,6 +66,7 @@ const (
 	max_shockwave_delay_ms = 3000
 	player_start_health    = 8
 	giant_start_health     = 10
+	num_slimes_on_map      = 25
 )
 
 var (
@@ -89,6 +90,7 @@ var (
 	see_thru_blue   = color.RGBA{R: 0, G: 0, B: 255, A: 10}
 	tag_wall        = resolv.NewTag("wall")
 	tag_giant       = resolv.NewTag("giant")
+	tag_collectible = resolv.NewTag("collectible")
 	shockwave_dist  = float64(grid_size * 10)
 	throw_dist      = float64(grid_size * 5)
 	max_los_dist    = float64(grid_size * 5)
@@ -138,8 +140,8 @@ func (g *Game) LoadSoundPlayer(filename string) *audio.Player {
 // each "past self" of a player is a separate Player instance
 // with a separate starting position, input history, current position, etc
 type Player struct {
-	start_x        float64 // start pos in cell coordinates (not in px)
-	start_y        float64
+	start_x        int // start pos in cell coordinates (not in px)
+	start_y        int
 	x              float64 // curr pos in px
 	y              float64
 	dx             float64 // delta position (velocity)
@@ -155,6 +157,7 @@ type Player struct {
 	health         int
 	walk_anim      [4]*ganim8.Animation // an animation for each of the 4 directions
 	throw_cooldown bool
+	num_slimes     int
 }
 
 func (self *Player) TakeDamage(damage int) {
@@ -230,8 +233,8 @@ func (g *Game) Update() error {
 
 		if is_past_self && g.player_input.ActionIsJustPressed(action_time_travel) {
 			self.health = player_start_health
-			new_x := self.start_x * grid_size
-			new_y := self.start_y * grid_size
+			new_x := float64(self.start_x * grid_size)
+			new_y := float64(self.start_y * grid_size)
 
 			// we can't simply call SetPosition(center_x, center_y) adjusted with player.w/2 & player.h/2
 			// because our player hitbox isn't exactly the same shape as the player image (player.w/player.h)
@@ -360,6 +363,23 @@ func (g *Game) Update() error {
 			},
 		})
 
+		// pick up collectibles
+		self.rect.IntersectionTest(resolv.IntersectionTestSettings{
+			TestAgainst: near_shapes.ByTags(tag_collectible),
+			OnIntersect: func(set resolv.IntersectionSet) bool {
+				ix := slices.IndexFunc(g.slimes, func(s *Slime) bool {
+					return s.rect == set.OtherShape
+				})
+				if ix > -1 {
+					g.slimes = slices.Delete(g.slimes, ix, ix+1)
+					g.space.Remove(set.OtherShape)
+					self.num_slimes++
+				}
+				// keep iterating (in case we're touching multiple collectibles)
+				return true
+			},
+		})
+
 		if hist_point.just_pressed[action_down] {
 			self.dir = 0
 		} else if hist_point.just_pressed[action_right] {
@@ -389,7 +409,8 @@ func (g *Game) Update() error {
 			self.walk_anim[self.dir].GoToFrame(2)
 		}
 
-		if hist_point.just_released[action_throw_slime] && !self.throw_cooldown {
+		if hist_point.just_released[action_throw_slime] && !self.throw_cooldown && self.num_slimes > 0 {
+			self.num_slimes--
 			slime := &Slime{x: self.x + player_w/2, y: self.y + player_h/2}
 			slime.start_x, slime.start_y = slime.x, slime.y
 			slime.rect = resolv.NewRectangleFromTopLeft(slime.x, slime.y, slime_w, slime_h)
@@ -399,7 +420,7 @@ func (g *Game) Update() error {
 			slime.dx, slime.dy = normalizeVector(throw_vec_x, throw_vec_y, throw_speed)
 			g.slimes = append(g.slimes, slime)
 			self.throw_cooldown = true
-			g.timer_system.AfterDuration(time.Second, func(_ *et.Timer, _ int) et.FinishMode {
+			g.timer_system.AfterDuration(500*time.Millisecond, func(_ *et.Timer, _ int) et.FinishMode {
 				self.throw_cooldown = false
 				return et.FinishEnd
 			})
@@ -420,31 +441,34 @@ func (g *Game) Update() error {
 
 	// iterate backwards so we can safely remove them w/out messing up iteration
 	for i, slime := range slices.Backward(g.slimes) {
-		slime.x += slime.dx
-		slime.y += slime.dy
-		slime.rect.Move(slime.dx, slime.dy)
-		near_shapes := slime.rect.SelectTouchingCells(4).FilterShapes()
-		hit_something := slime.rect.IntersectionTest(resolv.IntersectionTestSettings{
-			TestAgainst: near_shapes.ByTags(tag_wall | tag_giant),
-			OnIntersect: func(set resolv.IntersectionSet) bool {
-				if set.OtherShape.Tags().Has(tag_giant) {
-					slime_giant_snd.Rewind()
-					slime_giant_snd.Play()
-					g.giant.health--
-					if g.giant.health == 0 {
-						g.space.Remove(g.giant.rect)
+		// skip slimes lying on the ground
+		if slime.dx != 0 || slime.dy != 0 {
+			slime.x += slime.dx
+			slime.y += slime.dy
+			slime.rect.Move(slime.dx, slime.dy)
+			near_shapes := slime.rect.SelectTouchingCells(4).FilterShapes()
+			hit_something := slime.rect.IntersectionTest(resolv.IntersectionTestSettings{
+				TestAgainst: near_shapes.ByTags(tag_wall | tag_giant),
+				OnIntersect: func(set resolv.IntersectionSet) bool {
+					if set.OtherShape.Tags().Has(tag_giant) {
+						slime_giant_snd.Rewind()
+						slime_giant_snd.Play()
+						g.giant.health--
+						if g.giant.health == 0 {
+							g.space.Remove(g.giant.rect)
+						}
+					} else {
+						slime_wall_snd.Rewind()
+						slime_wall_snd.Play()
 					}
-				} else {
-					slime_wall_snd.Rewind()
-					slime_wall_snd.Play()
-				}
-				return false
-			},
-		})
-		dist := distance(slime.start_x, slime.start_y, slime.x, slime.y)
-		if hit_something || dist > throw_dist {
-			g.slimes = slices.Delete(g.slimes, i, i+1)
-			g.space.Remove(slime.rect)
+					return false
+				},
+			})
+			dist := distance(slime.start_x, slime.start_y, slime.x, slime.y)
+			if hit_something || dist > throw_dist {
+				g.slimes = slices.Delete(g.slimes, i, i+1)
+				g.space.Remove(slime.rect)
+			}
 		}
 	}
 
@@ -661,7 +685,8 @@ func main() {
 	g.giant_anim.Pause()
 
 	g.giant = &Giant{health: giant_start_health}
-	g.giant.x, g.giant.y = findEmptyCells(giant_w/grid_size, giant_h/grid_size)
+	x, y := findEmptyCells(giant_w/grid_size, giant_h/grid_size)
+	g.giant.x, g.giant.y = float64(x*grid_size), float64(y*grid_size)
 	g.giant.rect = resolv.NewRectangleFromTopLeft(g.giant.x+3, g.giant.y+16, giant_w-4, giant_h-18)
 	g.giant.rect.Tags().Set(tag_giant)
 	g.space.Add(g.giant.rect)
@@ -680,6 +705,15 @@ func main() {
 	cam.SmoothOptions.SmoothDampTimeY = 0.12
 	cam.SmoothOptions.SmoothDampMaxSpeedY = 2500
 
+	for range num_slimes_on_map {
+		x, y := findEmptyCells(1, 1)
+		slime := &Slime{x: float64(x * grid_size), y: float64(y * grid_size)}
+		slime.rect = resolv.NewRectangleFromTopLeft(slime.x, slime.y, slime_w, slime_h)
+		slime.rect.Tags().Set(tag_collectible)
+		g.space.Add(slime.rect)
+		g.slimes = append(g.slimes, slime)
+	}
+
 	if err := ebiten.RunGame(g); err != nil {
 		log.Fatal(err)
 	}
@@ -689,8 +723,8 @@ func initPlayer(g *Game) *Player {
 	player := &Player{health: player_start_health}
 
 	player.start_x, player.start_y = findEmptyCells(player_w/grid_size, player_h/grid_size)
-	player.x = player.start_x * grid_size
-	player.y = player.start_y * grid_size
+	player.x = float64(player.start_x * grid_size)
+	player.y = float64(player.start_y * grid_size)
 
 	// player hitbox is smaller than the frame
 	player.rect = resolv.NewRectangleFromTopLeft(player.x+2, player.y+11, 11, 20)
@@ -715,7 +749,7 @@ func initPlayer(g *Game) *Player {
 }
 
 // pass the # of adjacent empty cells needed (1 wide x 2 high for a player)
-func findEmptyCells(width int, height int) (float64, float64) {
+func findEmptyCells(width int, height int) (int, int) {
 	// find a random, empty space in the map
 	for _ = range 1000 {
 		x := rand.IntN(map_w)
@@ -731,7 +765,7 @@ func findEmptyCells(width int, height int) (float64, float64) {
 			}
 		}
 		if all_are_empty {
-			return float64(x), float64(y)
+			return x, y
 		}
 	}
 	panic("Unable to find an empty pair of cells to spawn player after 1000 tries")
