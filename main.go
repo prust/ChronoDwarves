@@ -32,10 +32,12 @@ const (
 	action_right
 	action_up
 	action_down
+	action_throw_slime
 	// misc non-history actions
 	action_cam_reset
 	action_hitbox
 	action_time_travel
+	num_hist_actions = 5
 
 	sample_rate  = 48000
 	anim_rate    = time.Second / 8 // 8fps pixel art animation (looping 3-frame walk cycles)
@@ -52,13 +54,14 @@ const (
 )
 
 var (
-	hist_actions  = [4]input.Action{action_left, action_right, action_up, action_down}
+	hist_actions  = [num_hist_actions]input.Action{action_left, action_right, action_up, action_down, action_throw_slime}
 	cam           *kamera.Camera
 	game_map      *dngn.Layout
 	wall_img      *ebiten.Image
 	door_img      *ebiten.Image
 	floor_img     *ebiten.Image
 	giant_img     *ebiten.Image
+	slime_img     *ebiten.Image
 	is_cam_reset  bool
 	show_hitboxes bool
 	tick          int // tick starts at 0, increments 60x/sec, and resets to 0 when you go back in time
@@ -77,6 +80,7 @@ type Game struct {
 	audio_context *audio.Context
 	space         *resolv.Space
 	wall_rects    []*resolv.ConvexPolygon
+	slimes        []*Slime
 }
 
 // each "past self" of a player is a separate Player instance
@@ -91,22 +95,29 @@ type Player struct {
 	rect       *resolv.ConvexPolygon // DRY violation w/ x,y -- should we solely use the collision lib rect?
 	dir        int                   // direction player is facing (indexes the animation array)
 	walk_sound *audio.Player
-	history    []InputHistoryPoint // condensed array of input history
-	hist_ix    int                 // index of the next input history point during a replay
-	is_pressed [4]bool             // track state of currently-pressed actions
+	history    []InputHistoryPoint    // condensed array of input history
+	hist_ix    int                    // index of the next input history point during a replay
+	is_pressed [num_hist_actions]bool // track state of currently-pressed actions
 }
 
 // the game's tick increments 60x/sec
 // but a history *point* is only recorded for a tick if the input changed
 type InputHistoryPoint struct {
 	tick          int
-	just_pressed  [4]bool
-	just_released [4]bool
+	just_pressed  [num_hist_actions]bool
+	just_released [num_hist_actions]bool
 }
 
 type Giant struct {
-	x float64
-	y float64
+	x    float64
+	y    float64
+	rect *resolv.ConvexPolygon
+}
+
+type Slime struct {
+	x    float64
+	y    float64
+	rect *resolv.ConvexPolygon
 }
 
 func (p *Player) NormalizeVelocity() {
@@ -374,6 +385,7 @@ func main() {
 	door_img = loadImg("door.png")
 	floor_img = loadImg("floor.png")
 	giant_img = loadImg("giant.png")
+	slime_img = loadImg("sm_slime.png")
 
 	// initialize input system
 	g.input_system.Init(input.SystemConfig{DevicesEnabled: input.AnyDevice})
@@ -385,6 +397,7 @@ func main() {
 		action_cam_reset:   {input.KeyC},
 		action_hitbox:      {input.KeyH},
 		action_time_travel: {input.KeyT},
+		action_throw_slime: {input.KeyMouseLeft},
 	}
 	g.player_input = g.input_system.NewHandler(0, keymap)
 	g.audio_context = audio.NewContext(sample_rate)
