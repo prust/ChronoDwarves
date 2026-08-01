@@ -88,6 +88,7 @@ var (
 	tag_wall        = resolv.NewTag("wall")
 	tag_giant       = resolv.NewTag("giant")
 	shockwave_dist  = float64(grid_size * 15)
+	throw_dist      = float64(grid_size * 5)
 )
 
 type Game struct {
@@ -187,11 +188,13 @@ type Giant struct {
 }
 
 type Slime struct {
-	x    float64
-	y    float64
-	dx   float64
-	dy   float64
-	rect *resolv.ConvexPolygon
+	x       float64
+	y       float64
+	dx      float64
+	dy      float64
+	rect    *resolv.ConvexPolygon
+	start_x float64
+	start_y float64
 }
 
 type Line struct {
@@ -380,6 +383,7 @@ func (g *Game) Update() error {
 
 		if hist_point.just_released[action_throw_slime] {
 			slime := &Slime{x: self.x + player_w/2, y: self.y + player_h/2}
+			slime.start_x, slime.start_y = slime.x, slime.y
 			slime.rect = resolv.NewRectangleFromTopLeft(slime.x, slime.y, slime_w, slime_h)
 			g.space.Add(slime.rect)
 			throw_vec_x := hist_point.mouse_x - slime.x
@@ -407,7 +411,7 @@ func (g *Game) Update() error {
 		slime.y += slime.dy
 		slime.rect.Move(slime.dx, slime.dy)
 		near_shapes := slime.rect.SelectTouchingCells(4).FilterShapes()
-		slime.rect.IntersectionTest(resolv.IntersectionTestSettings{
+		hit_something := slime.rect.IntersectionTest(resolv.IntersectionTestSettings{
 			TestAgainst: near_shapes.ByTags(tag_wall | tag_giant),
 			OnIntersect: func(set resolv.IntersectionSet) bool {
 				if set.OtherShape.Tags().Has(tag_giant) {
@@ -421,11 +425,14 @@ func (g *Game) Update() error {
 					slime_wall_snd.Rewind()
 					slime_wall_snd.Play()
 				}
-				g.slimes = slices.Delete(g.slimes, i, i+1)
-				g.space.Remove(slime.rect)
 				return false
 			},
 		})
+		dist := distance(slime.start_x, slime.start_y, slime.x, slime.y)
+		if hit_something || dist > throw_dist {
+			g.slimes = slices.Delete(g.slimes, i, i+1)
+			g.space.Remove(slime.rect)
+		}
 	}
 
 	if g.giant.health > 0 {
