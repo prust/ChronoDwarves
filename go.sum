@@ -40,6 +40,8 @@ github.com/setanarut/kamera/v2 v2.98.2 h1:eu8XQ/qO5v92zFhROwfd/BkoGe3RIPjW6FMqV7
 github.com/setanarut/kamera/v2 v2.98.2/go.mod h1:bNVeukSFBqViDERK4SF1TJ9Awgkpz3iGt53n2+o+ETI=
 github.com/solarlune/dngn v0.0.0-20240724224203-f9f4d976f3cc h1:jIFKUb9W2pzugfDZzuj7g3/Xj2P4Maa5kPtNIaKZzEs=
 github.com/solarlune/dngn v0.0.0-20240724224203-f9f4d976f3cc/go.mod h1:z8y2c7xJfPIExNipx0TOJhScvuNrViH5A2VREbMtyJ4=
+github.com/solarlune/ebitick v0.0.0-20260717205225-2390450f9f9d h1:HzxNxlR610IrAxQ3XONSi34cPZTf4JZt8gnmeOyNrxo=
+github.com/solarlune/ebitick v0.0.0-20260717205225-2390450f9f9d/go.mod h1:lRl36hg4G9kbASIhzApj//ayQHYY5vhRKheP/y9Mu4w=
 github.com/solarlune/resolv v0.8.1 h1:QkjnTJYB59EJmw+0+f52UbfE149ERU4FTCRICJTYz9k=
 github.com/solarlune/resolv v0.8.1/go.mod h1:iqRbXy78XQ7aDXGZY3abI41Wr80Yv1DqnxzzPvGG6yE=
 github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu7U=

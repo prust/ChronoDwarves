@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"embed"
+	"fmt"
 	"image/color"
 	"io/fs"
 	"log"
@@ -20,6 +21,7 @@ import (
 	input "github.com/quasilyte/ebitengine-input"
 	"github.com/setanarut/kamera/v2"
 	"github.com/solarlune/dngn"
+	"github.com/solarlune/ebitick"
 	"github.com/solarlune/resolv"
 	"github.com/yohamta/ganim8/v2"
 )
@@ -40,23 +42,28 @@ const (
 	action_time_travel
 	num_hist_actions = 5
 
-	sample_rate  = 48000
-	anim_rate    = time.Second / 8 // 8fps pixel art animation (looping 3-frame walk cycles)
-	player_speed = 3
-	throw_speed  = 5
-	player_w     = 16
-	player_h     = 32
-	giant_w      = 48
-	giant_h      = 64
-	slime_w      = 4
-	slime_h      = 4
-	grid_size    = 16
-	window_w     = 1024
-	window_h     = 768
-	screen_w     = window_w / 4
-	screen_h     = window_h / 4
-	map_w        = 50
-	map_h        = 50
+	sample_rate            = 48000
+	anim_rate              = time.Second / 8  // 8fps pixel art animation (looping 3-frame walk cycles)
+	giant_anim_rate        = time.Second / 24 // probably too many frames in this animation, play it faster
+	player_speed           = 3
+	throw_speed            = 5
+	player_w               = 16
+	player_h               = 32
+	giant_w                = 48
+	giant_h                = 64
+	shockwave_frame        = 9 // the frame at which the giant strikes the ground
+	slime_w                = 4
+	slime_h                = 4
+	grid_size              = 16
+	window_w               = 1024
+	window_h               = 768
+	screen_w               = window_w / 4
+	screen_h               = window_h / 4
+	map_w                  = 20
+	map_h                  = 20
+	min_shockwave_delay_ms = 1000
+	max_shockwave_delay_ms = 3000
+	player_start_health    = 4
 )
 
 var (
@@ -66,7 +73,6 @@ var (
 	wall_img      *ebiten.Image
 	door_img      *ebiten.Image
 	floor_img     *ebiten.Image
-	giant_img     *ebiten.Image
 	slime_img     *ebiten.Image
 	is_cam_reset  bool
 	show_hitboxes bool
@@ -80,6 +86,7 @@ type Game struct {
 	selves        []*Player            // past selves & current self
 	player_anim   [4]*ganim8.Animation // an animation for each of the 4 directions
 	giant         *Giant
+	giant_anim    *ganim8.Animation // one animation for the giant's shockwave punch
 	screen_w      int
 	screen_h      int
 	input_system  input.System
@@ -88,6 +95,7 @@ type Game struct {
 	space         *resolv.Space
 	wall_rects    []*resolv.ConvexPolygon
 	slimes        []*Slime
+	timer_system  *ebitick.TimerSystem
 }
 
 // each "past self" of a player is a separate Player instance
@@ -105,6 +113,7 @@ type Player struct {
 	history    []InputHistoryPoint    // condensed array of input history
 	hist_ix    int                    // index of the next input history point during a replay
 	is_pressed [num_hist_actions]bool // track state of currently-pressed actions
+	health     int
 }
 
 // the game's tick increments 60x/sec
@@ -118,10 +127,12 @@ type InputHistoryPoint struct {
 }
 
 type Giant struct {
-	health int
-	x      float64
-	y      float64
-	rect   *resolv.ConvexPolygon
+	health          int
+	x               float64
+	y               float64
+	rect            *resolv.ConvexPolygon
+	shockwave_punch bool
+	shockwave_timer *ebitick.Timer
 }
 
 type Slime struct {
@@ -141,6 +152,7 @@ func normalizeVector(x float64, y float64, desired_len float64) (float64, float6
 }
 
 func (g *Game) Update() error {
+	g.timer_system.Update()
 	g.input_system.Update()
 
 	// diagnostic actions & previous state
@@ -159,6 +171,7 @@ func (g *Game) Update() error {
 		is_past_self := !is_current_self
 
 		if g.player_input.ActionIsJustPressed(action_time_travel) {
+			self.health = player_start_health
 			self.x = self.start_x * grid_size
 			self.y = self.start_y * grid_size
 
@@ -184,24 +197,27 @@ func (g *Game) Update() error {
 		} else {
 			// "current" self
 			// store just pressed/released action in an input history point
+			// *if* the player is still alive
 			hist_point = InputHistoryPoint{tick: tick}
-			input_changed := false
-			for _, action := range hist_actions {
-				if g.player_input.ActionIsJustPressed(action) {
-					hist_point.just_pressed[action] = true
-					input_changed = true
+			if self.health > 0 {
+				input_changed := false
+				for _, action := range hist_actions {
+					if g.player_input.ActionIsJustPressed(action) {
+						hist_point.just_pressed[action] = true
+						input_changed = true
+					}
+					if g.player_input.ActionIsJustReleased(action) {
+						hist_point.just_released[action] = true
+						input_changed = true
+					}
 				}
-				if g.player_input.ActionIsJustReleased(action) {
-					hist_point.just_released[action] = true
-					input_changed = true
+				if hist_point.just_released[action_throw_slime] {
+					info, _ := g.player_input.JustReleasedActionInfo(action_throw_slime)
+					hist_point.mouse_x, hist_point.mouse_y = cam.ScreenToWorld(int(info.Pos.X), int(info.Pos.Y))
 				}
-			}
-			if hist_point.just_released[action_throw_slime] {
-				info, _ := g.player_input.JustReleasedActionInfo(action_throw_slime)
-				hist_point.mouse_x, hist_point.mouse_y = cam.ScreenToWorld(int(info.Pos.X), int(info.Pos.Y))
-			}
-			if input_changed {
-				self.history = append(self.history, hist_point)
+				if input_changed {
+					self.history = append(self.history, hist_point)
+				}
 			}
 		}
 
@@ -325,6 +341,30 @@ func (g *Game) Update() error {
 		})
 	}
 
+	if g.giant.health > 0 {
+		if g.giant.shockwave_timer == nil {
+			delay := randomMS(min_shockwave_delay_ms, max_shockwave_delay_ms)
+			time.Millisecond.Milliseconds()
+			g.giant.shockwave_timer = g.timer_system.AfterDuration(delay, func(timer *ebitick.Timer, loopCount int) ebitick.FinishMode {
+				g.giant.shockwave_punch = true
+				g.giant_anim.Resume()
+				g.giant.shockwave_timer = nil
+				return ebitick.FinishEnd
+			})
+		}
+
+		g.giant_anim.Update()
+		if g.giant.shockwave_punch && g.giant_anim.Position() == shockwave_frame {
+			if isOnScreen(g, g.giant.rect) {
+				curr_self := g.selves[len(g.selves)-1]
+				curr_self.health--
+				fmt.Println("Ouch!")
+			}
+			// TODO: on this frame, deliver damage to player if the player is still on-screen
+			g.giant.shockwave_punch = false
+		}
+	}
+
 	tick++
 	return nil
 }
@@ -368,16 +408,18 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	if g.giant.health > 0 {
 		op.GeoM.Reset()
 		op.GeoM.Translate(g.giant.x, g.giant.y)
-		cam.Draw(giant_img, op, screen)
+		cam.Draw(g.giant_anim.Frame(), op, screen)
 	}
 
 	for _, player := range g.selves {
-		op.GeoM.Reset()
-		op.GeoM.Translate(player.x, player.y)
-		cam.Draw(g.player_anim[player.dir].Frame(), op, screen)
+		if player.health > 0 {
+			op.GeoM.Reset()
+			op.GeoM.Translate(player.x, player.y)
+			cam.Draw(g.player_anim[player.dir].Frame(), op, screen)
 
-		if show_hitboxes {
-			drawHitbox(player.rect, cam, screen)
+			if show_hitboxes {
+				drawHitbox(player.rect, cam, screen)
+			}
 		}
 	}
 
@@ -397,8 +439,9 @@ func main() {
 	ebiten.SetWindowTitle("Ebitengine Template")
 
 	g := &Game{
-		screen_w: screen_w,
-		screen_h: screen_h,
+		screen_w:     screen_w,
+		screen_h:     screen_h,
+		timer_system: ebitick.NewTimerSystem(),
 	}
 
 	// generate map
@@ -442,7 +485,6 @@ func main() {
 	wall_img = loadImg("wall.png")
 	door_img = loadImg("door.png")
 	floor_img = loadImg("floor.png")
-	giant_img = loadImg("giant.png")
 	slime_img = loadImg("sm_slime.png")
 
 	// initialize input system
@@ -463,11 +505,19 @@ func main() {
 	g.selves = append(g.selves, player)
 
 	// 3 frame columns and 4 frame rows
-	g32 := ganim8.NewGrid(player_w, player_h, player_w*3, player_h*4)
-	g.player_anim[0] = ganim8.New(character_img, g32.Frames("1-3", 1), anim_rate)
-	g.player_anim[1] = ganim8.New(character_img, g32.Frames("1-3", 2), anim_rate)
-	g.player_anim[2] = ganim8.New(character_img, g32.Frames("1-3", 3), anim_rate)
-	g.player_anim[3] = ganim8.New(character_img, g32.Frames("1-3", 4), anim_rate)
+	g_pl := ganim8.NewGrid(player_w, player_h, player_w*3, player_h*4)
+	g.player_anim[0] = ganim8.New(character_img, g_pl.Frames("1-3", 1), anim_rate)
+	g.player_anim[1] = ganim8.New(character_img, g_pl.Frames("1-3", 2), anim_rate)
+	g.player_anim[2] = ganim8.New(character_img, g_pl.Frames("1-3", 3), anim_rate)
+	g.player_anim[3] = ganim8.New(character_img, g_pl.Frames("1-3", 4), anim_rate)
+
+	giant_img := loadImg("giant.png")
+	g_gi := ganim8.NewGrid(giant_w, giant_h, giant_w*15, giant_h*1)
+	g.giant_anim = ganim8.New(giant_img, g_gi.Frames("1-15", 1), giant_anim_rate, func(anim *ganim8.Animation, loops int) {
+		g.giant_anim.Pause()
+		g.giant_anim.GoToFrame(1)
+	})
+	g.giant_anim.Pause()
 
 	g.giant = &Giant{health: 10}
 	g.giant.x, g.giant.y = findEmptyCells(giant_w/grid_size, giant_h/grid_size)
@@ -489,7 +539,7 @@ func main() {
 }
 
 func initPlayer(g *Game) *Player {
-	player := &Player{}
+	player := &Player{health: player_start_health}
 
 	player.start_x, player.start_y = findEmptyCells(player_w/grid_size, player_h/grid_size)
 	player.x = player.start_x * grid_size
@@ -547,12 +597,23 @@ func loadImg(filename string) *ebiten.Image {
 	return wall_img
 }
 
+func isOnScreen(g *Game, rect *resolv.ConvexPolygon) bool {
+	x1, y1 := cam.ScreenToWorld(0, 0)
+	x2, y2 := cam.ScreenToWorld(g.screen_w, g.screen_h)
+	bnds := rect.Bounds()
+	return isRectangleOverlap(x1, y1, x2, y2, bnds.Min.X, bnds.Min.Y, bnds.Max.X, bnds.Max.Y)
+}
+
 func isRectangleOverlap(x1 float64, y1 float64, x2 float64, y2 float64, x3 float64, y3 float64, x4 float64, y4 float64) bool {
 	// If any of these are true, the rectangles do NOT overlap
 	if y3 >= y2 || y4 <= y1 || x3 >= x2 || x4 <= x1 {
 		return false
 	}
 	return true
+}
+
+func randomMS(min int, max int) time.Duration {
+	return time.Duration(rand.IntN(max-min)+min) * time.Millisecond
 }
 
 // drawRedRect() is for debugging purposes (takes world coordinates, translates to screen coords before drawing)
