@@ -8,6 +8,7 @@ import (
 	"log"
 	"math"
 	"math/rand/v2"
+	"slices"
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -32,18 +33,23 @@ const (
 	action_right
 	action_up
 	action_down
+	action_throw_slime
 	// misc non-history actions
 	action_cam_reset
 	action_hitbox
 	action_time_travel
+	num_hist_actions = 5
 
 	sample_rate  = 48000
 	anim_rate    = time.Second / 8 // 8fps pixel art animation (looping 3-frame walk cycles)
 	player_speed = 3
+	throw_speed  = 5
 	player_w     = 16
 	player_h     = 32
 	giant_w      = 48
 	giant_h      = 64
+	slime_w      = 4
+	slime_h      = 4
 	grid_size    = 16
 	window_w     = 1024
 	window_h     = 768
@@ -54,18 +60,20 @@ const (
 )
 
 var (
-	hist_actions  = [4]input.Action{action_left, action_right, action_up, action_down}
+	hist_actions  = [num_hist_actions]input.Action{action_left, action_right, action_up, action_down, action_throw_slime}
 	cam           *kamera.Camera
 	game_map      *dngn.Layout
 	wall_img      *ebiten.Image
 	door_img      *ebiten.Image
 	floor_img     *ebiten.Image
 	giant_img     *ebiten.Image
+	slime_img     *ebiten.Image
 	is_cam_reset  bool
 	show_hitboxes bool
 	tick          int // tick starts at 0, increments 60x/sec, and resets to 0 when you go back in time
 	red           = color.RGBA{R: 255, G: 0, B: 0, A: 255}
 	tag_wall      = resolv.NewTag("wall")
+	tag_giant     = resolv.NewTag("giant")
 )
 
 type Game struct {
@@ -79,6 +87,7 @@ type Game struct {
 	audio_context *audio.Context
 	space         *resolv.Space
 	wall_rects    []*resolv.ConvexPolygon
+	slimes        []*Slime
 }
 
 // each "past self" of a player is a separate Player instance
@@ -93,32 +102,42 @@ type Player struct {
 	rect       *resolv.ConvexPolygon // DRY violation w/ x,y -- should we solely use the collision lib rect?
 	dir        int                   // direction player is facing (indexes the animation array)
 	walk_sound *audio.Player
-	history    []InputHistoryPoint // condensed array of input history
-	hist_ix    int                 // index of the next input history point during a replay
-	is_pressed [4]bool             // track state of currently-pressed actions
+	history    []InputHistoryPoint    // condensed array of input history
+	hist_ix    int                    // index of the next input history point during a replay
+	is_pressed [num_hist_actions]bool // track state of currently-pressed actions
 }
 
 // the game's tick increments 60x/sec
 // but a history *point* is only recorded for a tick if the input changed
 type InputHistoryPoint struct {
 	tick          int
-	just_pressed  [4]bool
-	just_released [4]bool
+	just_pressed  [num_hist_actions]bool
+	just_released [num_hist_actions]bool
+	mouse_x       float64
+	mouse_y       float64
 }
 
 type Giant struct {
-	x float64
-	y float64
+	health int
+	x      float64
+	y      float64
+	rect   *resolv.ConvexPolygon
 }
 
-func (p *Player) NormalizeVelocity() {
-	length_squared := math.Sqrt(p.dx*p.dx + p.dy*p.dy)
-	if length_squared == 0 {
-		return
-	} else {
-		p.dx *= player_speed / length_squared
-		p.dy *= player_speed / length_squared
+type Slime struct {
+	x    float64
+	y    float64
+	dx   float64
+	dy   float64
+	rect *resolv.ConvexPolygon
+}
+
+func normalizeVector(x float64, y float64, desired_len float64) (float64, float64) {
+	curr_len := math.Sqrt(x*x + y*y)
+	if curr_len == 0 {
+		return 0, 0
 	}
+	return x * desired_len / curr_len, y * desired_len / curr_len
 }
 
 func (g *Game) Update() error {
@@ -130,6 +149,7 @@ func (g *Game) Update() error {
 
 	if g.player_input.ActionIsJustPressed(action_time_travel) {
 		tick = 0
+		g.slimes = g.slimes[:0]
 		g.selves = append(g.selves, initPlayer(g))
 	}
 
@@ -176,6 +196,10 @@ func (g *Game) Update() error {
 					input_changed = true
 				}
 			}
+			if hist_point.just_released[action_throw_slime] {
+				info, _ := g.player_input.JustReleasedActionInfo(action_throw_slime)
+				hist_point.mouse_x, hist_point.mouse_y = cam.ScreenToWorld(int(info.Pos.X), int(info.Pos.Y))
+			}
 			if input_changed {
 				self.history = append(self.history, hist_point)
 			}
@@ -207,7 +231,7 @@ func (g *Game) Update() error {
 		}
 		is_walking := self.dx != 0 || self.dy != 0
 
-		self.NormalizeVelocity()
+		self.dx, self.dy = normalizeVector(self.dx, self.dy, player_speed)
 
 		self.x += self.dx
 		self.y += self.dy
@@ -256,6 +280,16 @@ func (g *Game) Update() error {
 			g.player_anim[self.dir].GoToFrame(2)
 		}
 
+		if hist_point.just_released[action_throw_slime] {
+			slime := &Slime{x: self.x + player_w/2, y: self.y + player_h/2}
+			slime.rect = resolv.NewRectangleFromTopLeft(slime.x, slime.y, slime_w, slime_h)
+			g.space.Add(slime.rect)
+			throw_vec_x := hist_point.mouse_x - slime.x
+			throw_vec_y := hist_point.mouse_y - slime.y
+			slime.dx, slime.dy = normalizeVector(throw_vec_x, throw_vec_y, throw_speed)
+			g.slimes = append(g.slimes, slime)
+		}
+
 		if is_walking {
 			g.player_anim[self.dir].Update()
 		}
@@ -267,6 +301,28 @@ func (g *Game) Update() error {
 				cam.LookAt(float64(self.x), float64(self.y))
 			}
 		}
+	}
+
+	// iterate backwards so we can safely remove them w/out messing up iteration
+	for i, slime := range slices.Backward(g.slimes) {
+		slime.x += slime.dx
+		slime.y += slime.dy
+		slime.rect.Move(slime.dx, slime.dy)
+		near_shapes := slime.rect.SelectTouchingCells(4).FilterShapes()
+		slime.rect.IntersectionTest(resolv.IntersectionTestSettings{
+			TestAgainst: near_shapes.ByTags(tag_wall | tag_giant),
+			OnIntersect: func(set resolv.IntersectionSet) bool {
+				if set.OtherShape.Tags().Has(tag_giant) {
+					g.giant.health--
+					if g.giant.health == 0 {
+						g.space.Remove(g.giant.rect)
+					}
+				}
+				g.slimes = slices.Delete(g.slimes, i, i+1)
+				g.space.Remove(slime.rect)
+				return false
+			},
+		})
 	}
 
 	tick++
@@ -306,11 +362,14 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		for _, wall_rect := range g.wall_rects {
 			drawHitbox(wall_rect, cam, screen)
 		}
+		drawHitbox(g.giant.rect, cam, screen)
 	}
 
-	op.GeoM.Reset()
-	op.GeoM.Translate(g.giant.x, g.giant.y)
-	cam.Draw(giant_img, op, screen)
+	if g.giant.health > 0 {
+		op.GeoM.Reset()
+		op.GeoM.Translate(g.giant.x, g.giant.y)
+		cam.Draw(giant_img, op, screen)
+	}
 
 	for _, player := range g.selves {
 		op.GeoM.Reset()
@@ -320,6 +379,12 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		if show_hitboxes {
 			drawHitbox(player.rect, cam, screen)
 		}
+	}
+
+	for _, slime := range g.slimes {
+		op.GeoM.Reset()
+		op.GeoM.Translate(slime.x, slime.y)
+		cam.Draw(slime_img, op, screen)
 	}
 }
 
@@ -378,6 +443,7 @@ func main() {
 	door_img = loadImg("door.png")
 	floor_img = loadImg("floor.png")
 	giant_img = loadImg("giant.png")
+	slime_img = loadImg("sm_slime.png")
 
 	// initialize input system
 	g.input_system.Init(input.SystemConfig{DevicesEnabled: input.AnyDevice})
@@ -389,6 +455,7 @@ func main() {
 		action_cam_reset:   {input.KeyC},
 		action_hitbox:      {input.KeyH},
 		action_time_travel: {input.KeyT},
+		action_throw_slime: {input.KeyMouseLeft},
 	}
 	g.player_input = g.input_system.NewHandler(0, keymap)
 	g.audio_context = audio.NewContext(sample_rate)
@@ -402,8 +469,11 @@ func main() {
 	g.player_anim[2] = ganim8.New(character_img, g32.Frames("1-3", 3), anim_rate)
 	g.player_anim[3] = ganim8.New(character_img, g32.Frames("1-3", 4), anim_rate)
 
-	g.giant = &Giant{}
+	g.giant = &Giant{health: 10}
 	g.giant.x, g.giant.y = findEmptyCells(giant_w/grid_size, giant_h/grid_size)
+	g.giant.rect = resolv.NewRectangleFromTopLeft(g.giant.x+3, g.giant.y+16, giant_w-4, giant_h-18)
+	g.giant.rect.Tags().Set(tag_giant)
+	g.space.Add(g.giant.rect)
 
 	cam = kamera.NewCamera(player.x, player.y, float64(g.screen_w), float64(g.screen_h))
 	cam.ShakeEnabled = true
