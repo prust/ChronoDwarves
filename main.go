@@ -101,19 +101,21 @@ type Game struct {
 // each "past self" of a player is a separate Player instance
 // with a separate starting position, input history, current position, etc
 type Player struct {
-	start_x    float64 // start pos in cell coordinates (not in px)
-	start_y    float64
-	x          float64 // curr pos in px
-	y          float64
-	dx         float64 // delta position (velocity)
-	dy         float64
-	rect       *resolv.ConvexPolygon // DRY violation w/ x,y -- should we solely use the collision lib rect?
-	dir        int                   // direction player is facing (indexes the animation array)
-	walk_sound *audio.Player
-	history    []InputHistoryPoint    // condensed array of input history
-	hist_ix    int                    // index of the next input history point during a replay
-	is_pressed [num_hist_actions]bool // track state of currently-pressed actions
-	health     int
+	start_x     float64 // start pos in cell coordinates (not in px)
+	start_y     float64
+	x           float64 // curr pos in px
+	y           float64
+	dx          float64 // delta position (velocity)
+	dy          float64
+	rect        *resolv.ConvexPolygon // DRY violation w/ x,y -- should we solely use the collision lib rect?
+	dir         int                   // direction player is facing (indexes the animation array)
+	walk_sound  *audio.Player
+	hurt_sound  *audio.Player
+	death_sound *audio.Player
+	history     []InputHistoryPoint    // condensed array of input history
+	hist_ix     int                    // index of the next input history point during a replay
+	is_pressed  [num_hist_actions]bool // track state of currently-pressed actions
+	health      int
 }
 
 // the game's tick increments 60x/sec
@@ -360,6 +362,14 @@ func (g *Game) Update() error {
 			if isOnScreen(g, g.giant.rect) {
 				curr_self := g.selves[len(g.selves)-1]
 				curr_self.health--
+				var sound *audio.Player
+				if curr_self.health <= 0 {
+					sound = curr_self.death_sound
+				} else {
+					sound = curr_self.hurt_sound
+				}
+				sound.Rewind()
+				sound.Play()
 				fmt.Println("Ouch!")
 			}
 			// TODO: on this frame, deliver damage to player if the player is still on-screen
@@ -555,6 +565,12 @@ func initPlayer(g *Game) *Player {
 	loop_walk := audio.NewInfiniteLoop(walk_wav, walk_wav.Length())
 	var err error
 	player.walk_sound, err = g.audio_context.NewPlayerF32(loop_walk)
+	check(err)
+	hurt_wav := loadWav("hurt.wav")
+	player.hurt_sound, err = g.audio_context.NewPlayerF32(hurt_wav)
+	check(err)
+	death_wav := loadWav("death.wav")
+	player.death_sound, err = g.audio_context.NewPlayerF32(death_wav)
 	check(err)
 
 	return player
