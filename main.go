@@ -42,7 +42,7 @@ const (
 
 	sample_rate  = 48000
 	anim_rate    = time.Second / 8 // 8fps pixel art animation (looping 3-frame walk cycles)
-	player_speed = 4
+	player_speed = 3
 	throw_speed  = 5
 	player_w     = 16
 	player_h     = 32
@@ -55,6 +55,8 @@ const (
 	window_h     = 768
 	screen_w     = window_w / 4
 	screen_h     = window_h / 4
+	map_w        = 50
+	map_h        = 50
 )
 
 var (
@@ -390,7 +392,7 @@ func main() {
 	}
 
 	// generate map
-	game_map = dngn.NewLayout(100, 100)
+	game_map = dngn.NewLayout(map_w, map_h)
 	game_map.GenerateBSP(dngn.NewDefaultBSPOptions())
 	// extend doors so they are 2 tiles high instead of just 1
 	door_select := game_map.Select().FilterByRune('#')
@@ -402,18 +404,20 @@ func main() {
 	}
 
 	// line the outer border of the map with walls
-	for n := range 100 {
+	for n := range map_w {
 		// left and right walls
 		game_map.Set(n, 0, 'x')
-		game_map.Set(n, 99, 'x')
+		game_map.Set(n, map_h-1, 'x')
+	}
+	for n := range map_h {
 		// top and bottom walls
 		game_map.Set(0, n, 'x')
-		game_map.Set(99, n, 'x')
+		game_map.Set(map_w-1, n, 'x')
 	}
 
 	// create resolv (collision detection) rectangles for walls in the grid
 	// trying a 4x "cell" size (double grid width & double grid height) for performant collision checks
-	g.space = resolv.NewSpace(100*grid_size, 100*grid_size, grid_size*2, grid_size*2)
+	g.space = resolv.NewSpace(map_w*grid_size, map_h*grid_size, grid_size*2, grid_size*2)
 	wall_select := game_map.Select().FilterByRune('x')
 	g.wall_rects = make([]*resolv.ConvexPolygon, 0, len(wall_select.Cells))
 	for cell := range wall_select.Cells {
@@ -463,7 +467,10 @@ func main() {
 	cam = kamera.NewCamera(player.x, player.y, float64(g.screen_w), float64(g.screen_h))
 	cam.ShakeEnabled = true
 	cam.SmoothType = kamera.SmoothDamp
-	cam.SmoothOptions.SmoothDampTimeX = 0.15
+	cam.SmoothOptions.SmoothDampTimeX = 0.12
+	cam.SmoothOptions.SmoothDampMaxSpeedX = 2500
+	cam.SmoothOptions.SmoothDampTimeY = 0.12
+	cam.SmoothOptions.SmoothDampMaxSpeedY = 2500
 
 	if err := ebiten.RunGame(g); err != nil {
 		log.Fatal(err)
@@ -478,7 +485,7 @@ func initPlayer(g *Game) *Player {
 	player.y = player.start_y * grid_size
 
 	// player hitbox is smaller than the frame
-	player.rect = resolv.NewRectangleFromTopLeft(player.x+2, player.y+11, 11, 19)
+	player.rect = resolv.NewRectangleFromTopLeft(player.x+2, player.y+11, 11, 20)
 	g.space.Add(player.rect)
 
 	walk_wav := loadWav("walk.wav")
@@ -494,8 +501,8 @@ func initPlayer(g *Game) *Player {
 func findEmptyCells(width int, height int) (float64, float64) {
 	// find a random, empty space in the map
 	for _ = range 1000 {
-		x := rand.IntN(100)
-		y := rand.IntN(100)
+		x := rand.IntN(map_w)
+		y := rand.IntN(map_h)
 
 		// ensure the requested range of cells are all empty
 		all_are_empty := true
