@@ -404,7 +404,10 @@ func main() {
 	cam = kamera.NewCamera(player.x, player.y, float64(g.screen_w), float64(g.screen_h))
 	cam.ShakeEnabled = true
 	cam.SmoothType = kamera.SmoothDamp
-	cam.SmoothOptions.SmoothDampTimeX = 0.15
+	cam.SmoothOptions.SmoothDampTimeX = 0.12
+	cam.SmoothOptions.SmoothDampMaxSpeedX = 2500
+	cam.SmoothOptions.SmoothDampTimeY = 0.12
+	cam.SmoothOptions.SmoothDampMaxSpeedY = 2500
 
 	if err := ebiten.RunGame(g); err != nil {
 		log.Fatal(err)
