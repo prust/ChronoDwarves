@@ -19,6 +19,7 @@ require (
 	github.com/jezek/xgb v1.3.1 // indirect
 	github.com/quasilyte/gmath v0.0.0-20221217210116-fba37a2e15c7 // indirect
 	github.com/setanarut/fastnoise v1.2.0 // indirect
+	github.com/solarlune/ebitick v0.0.0-20260717205225-2390450f9f9d // indirect
 	golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f // indirect
 	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/sys v0.43.0 // indirect
