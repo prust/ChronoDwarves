@@ -137,22 +137,23 @@ func (g *Game) LoadSoundPlayer(filename string) *audio.Player {
 // each "past self" of a player is a separate Player instance
 // with a separate starting position, input history, current position, etc
 type Player struct {
-	start_x    float64 // start pos in cell coordinates (not in px)
-	start_y    float64
-	x          float64 // curr pos in px
-	y          float64
-	dx         float64 // delta position (velocity)
-	dy         float64
-	rect       *resolv.ConvexPolygon // DRY violation w/ x,y -- should we solely use the collision lib rect?
-	dir        int                   // direction player is facing (indexes the animation array)
-	walk_snd   *audio.Player
-	hurt_snd   *audio.Player
-	death_snd  *audio.Player
-	history    []InputHistoryPoint    // condensed array of input history
-	hist_ix    int                    // index of the next input history point during a replay
-	is_pressed [num_hist_actions]bool // track state of currently-pressed actions
-	health     int
-	walk_anim  [4]*ganim8.Animation // an animation for each of the 4 directions
+	start_x        float64 // start pos in cell coordinates (not in px)
+	start_y        float64
+	x              float64 // curr pos in px
+	y              float64
+	dx             float64 // delta position (velocity)
+	dy             float64
+	rect           *resolv.ConvexPolygon // DRY violation w/ x,y -- should we solely use the collision lib rect?
+	dir            int                   // direction player is facing (indexes the animation array)
+	walk_snd       *audio.Player
+	hurt_snd       *audio.Player
+	death_snd      *audio.Player
+	history        []InputHistoryPoint    // condensed array of input history
+	hist_ix        int                    // index of the next input history point during a replay
+	is_pressed     [num_hist_actions]bool // track state of currently-pressed actions
+	health         int
+	walk_anim      [4]*ganim8.Animation // an animation for each of the 4 directions
+	throw_cooldown bool
 }
 
 func (self *Player) TakeDamage(damage int) {
@@ -386,7 +387,7 @@ func (g *Game) Update() error {
 			self.walk_anim[self.dir].GoToFrame(2)
 		}
 
-		if hist_point.just_released[action_throw_slime] {
+		if hist_point.just_released[action_throw_slime] && !self.throw_cooldown {
 			slime := &Slime{x: self.x + player_w/2, y: self.y + player_h/2}
 			slime.start_x, slime.start_y = slime.x, slime.y
 			slime.rect = resolv.NewRectangleFromTopLeft(slime.x, slime.y, slime_w, slime_h)
@@ -395,6 +396,11 @@ func (g *Game) Update() error {
 			throw_vec_y := hist_point.mouse_y - slime.y
 			slime.dx, slime.dy = normalizeVector(throw_vec_x, throw_vec_y, throw_speed)
 			g.slimes = append(g.slimes, slime)
+			self.throw_cooldown = true
+			g.timer_system.AfterDuration(time.Second, func(_ *et.Timer, _ int) et.FinishMode {
+				self.throw_cooldown = false
+				return et.FinishEnd
+			})
 		}
 
 		if is_walking {
