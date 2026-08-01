@@ -68,23 +68,25 @@ const (
 )
 
 var (
-	hist_actions   = [num_hist_actions]input.Action{action_left, action_right, action_up, action_down, action_throw_slime}
-	cam            *kamera.Camera
-	game_map       *dngn.Layout
-	character_img  *ebiten.Image
-	wall_img       *ebiten.Image
-	door_img       *ebiten.Image
-	floor_img      *ebiten.Image
-	slime_img      *ebiten.Image
-	is_cam_reset   bool
-	show_hitboxes  bool
-	tick           int // tick starts at 0, increments 60x/sec, and resets to 0 when you go back in time
-	shockwave_dist float64
-	shockwave_snd  *audio.Player
-	red            = color.RGBA{R: 255, G: 0, B: 0, A: 255}
-	blue           = color.RGBA{R: 0, G: 0, B: 255, A: 255}
-	tag_wall       = resolv.NewTag("wall")
-	tag_giant      = resolv.NewTag("giant")
+	hist_actions    = [num_hist_actions]input.Action{action_left, action_right, action_up, action_down, action_throw_slime}
+	cam             *kamera.Camera
+	game_map        *dngn.Layout
+	character_img   *ebiten.Image
+	wall_img        *ebiten.Image
+	door_img        *ebiten.Image
+	floor_img       *ebiten.Image
+	slime_img       *ebiten.Image
+	is_cam_reset    bool
+	show_hitboxes   bool
+	tick            int // tick starts at 0, increments 60x/sec, and resets to 0 when you go back in time
+	shockwave_dist  float64
+	shockwave_snd   *audio.Player
+	slime_giant_snd *audio.Player
+	slime_wall_snd  *audio.Player
+	red             = color.RGBA{R: 255, G: 0, B: 0, A: 255}
+	blue            = color.RGBA{R: 0, G: 0, B: 255, A: 255}
+	tag_wall        = resolv.NewTag("wall")
+	tag_giant       = resolv.NewTag("giant")
 )
 
 type Game struct {
@@ -118,6 +120,14 @@ func (g *Game) VolumeByPlayerDist(rect *resolv.ConvexPolygon, max_dist int, max_
 		inverse_pct := 1 - pct_of_max_dist
 		return inverse_pct * max_vol
 	}
+}
+
+// higher level than loadWav(), not to be used for InfiniteLoop sounds
+func (g *Game) LoadSoundPlayer(filename string) *audio.Player {
+	wav := loadWav(filename)
+	snd_player, err := g.audio_context.NewPlayerF32(wav)
+	check(err)
+	return snd_player
 }
 
 // each "past self" of a player is a separate Player instance
@@ -400,10 +410,15 @@ func (g *Game) Update() error {
 			TestAgainst: near_shapes.ByTags(tag_wall | tag_giant),
 			OnIntersect: func(set resolv.IntersectionSet) bool {
 				if set.OtherShape.Tags().Has(tag_giant) {
+					slime_giant_snd.Rewind()
+					slime_giant_snd.Play()
 					g.giant.health--
 					if g.giant.health == 0 {
 						g.space.Remove(g.giant.rect)
 					}
+				} else {
+					slime_wall_snd.Rewind()
+					slime_wall_snd.Play()
 				}
 				g.slimes = slices.Delete(g.slimes, i, i+1)
 				g.space.Remove(slime.rect)
@@ -596,11 +611,10 @@ func main() {
 		action_throw_slime: {input.KeyMouseLeft},
 	}
 
-	var err error
 	g.audio_context = audio.NewContext(sample_rate)
-	shockwave_wav := loadWav("shockwave.wav")
-	shockwave_snd, err = g.audio_context.NewPlayerF32(shockwave_wav)
-	check(err)
+	shockwave_snd = g.LoadSoundPlayer("shockwave.wav")
+	slime_giant_snd = g.LoadSoundPlayer("hit_giant.wav")
+	slime_wall_snd = g.LoadSoundPlayer("hit_wall.wav")
 
 	g.player_input = g.input_system.NewHandler(0, keymap)
 	player := initPlayer(g)
@@ -665,12 +679,8 @@ func initPlayer(g *Game) *Player {
 	var err error
 	player.walk_snd, err = g.audio_context.NewPlayerF32(loop_walk)
 	check(err)
-	hurt_wav := loadWav("hurt.wav")
-	player.hurt_snd, err = g.audio_context.NewPlayerF32(hurt_wav)
-	check(err)
-	death_wav := loadWav("death.wav")
-	player.death_snd, err = g.audio_context.NewPlayerF32(death_wav)
-	check(err)
+	player.hurt_snd = g.LoadSoundPlayer("hurt.wav")
+	player.death_snd = g.LoadSoundPlayer("death.wav")
 
 	g_pl := ganim8.NewGrid(player_w, player_h, player_w*3, player_h*5)
 	player.walk_anim[0] = ganim8.New(character_img, g_pl.Frames("1-3", 1), anim_rate)
