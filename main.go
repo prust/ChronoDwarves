@@ -68,35 +68,37 @@ const (
 )
 
 var (
-	hist_actions  = [num_hist_actions]input.Action{action_left, action_right, action_up, action_down, action_throw_slime}
-	cam           *kamera.Camera
-	game_map      *dngn.Layout
-	wall_img      *ebiten.Image
-	door_img      *ebiten.Image
-	floor_img     *ebiten.Image
-	slime_img     *ebiten.Image
-	is_cam_reset  bool
-	show_hitboxes bool
-	tick          int // tick starts at 0, increments 60x/sec, and resets to 0 when you go back in time
-	red           = color.RGBA{R: 255, G: 0, B: 0, A: 255}
-	tag_wall      = resolv.NewTag("wall")
-	tag_giant     = resolv.NewTag("giant")
+	hist_actions   = [num_hist_actions]input.Action{action_left, action_right, action_up, action_down, action_throw_slime}
+	cam            *kamera.Camera
+	game_map       *dngn.Layout
+	wall_img       *ebiten.Image
+	door_img       *ebiten.Image
+	floor_img      *ebiten.Image
+	slime_img      *ebiten.Image
+	is_cam_reset   bool
+	show_hitboxes  bool
+	tick           int // tick starts at 0, increments 60x/sec, and resets to 0 when you go back in time
+	shockwave_dist float64
+	red            = color.RGBA{R: 255, G: 0, B: 0, A: 255}
+	tag_wall       = resolv.NewTag("wall")
+	tag_giant      = resolv.NewTag("giant")
 )
 
 type Game struct {
-	selves        []*Player            // past selves & current self
-	player_anim   [4]*ganim8.Animation // an animation for each of the 4 directions
-	giant         *Giant
-	giant_anim    *ganim8.Animation // one animation for the giant's shockwave punch
-	screen_w      int
-	screen_h      int
-	input_system  input.System
-	player_input  *input.Handler
-	audio_context *audio.Context
-	space         *resolv.Space
-	wall_rects    []*resolv.ConvexPolygon
-	slimes        []*Slime
-	timer_system  *ebitick.TimerSystem
+	selves            []*Player            // past selves & current self
+	player_anim       [4]*ganim8.Animation // an animation for each of the 4 directions
+	player_death_anim *ganim8.Animation
+	giant             *Giant
+	giant_anim        *ganim8.Animation // one animation for the giant's shockwave punch
+	screen_w          int
+	screen_h          int
+	input_system      input.System
+	player_input      *input.Handler
+	audio_context     *audio.Context
+	space             *resolv.Space
+	wall_rects        []*resolv.ConvexPolygon
+	slimes            []*Slime
+	timer_system      *ebitick.TimerSystem
 }
 
 // each "past self" of a player is a separate Player instance
@@ -146,14 +148,6 @@ type Slime struct {
 	rect *resolv.ConvexPolygon
 }
 
-func normalizeVector(x float64, y float64, desired_len float64) (float64, float64) {
-	curr_len := math.Sqrt(x*x + y*y)
-	if curr_len == 0 {
-		return 0, 0
-	}
-	return x * desired_len / curr_len, y * desired_len / curr_len
-}
-
 func (g *Game) Update() error {
 	g.timer_system.Update()
 	g.input_system.Update()
@@ -183,6 +177,11 @@ func (g *Game) Update() error {
 			self.rect.Move(new_x-self.x, new_y-self.y)
 			self.x, self.y = new_x, new_y
 
+			// drop past-selves volume, so your current self's volume is most prominent
+			self.walk_sound.SetVolume(0.25)
+			self.hurt_sound.SetVolume(0.25)
+			self.death_sound.SetVolume(0.25)
+
 			self.hist_ix = 0
 		}
 
@@ -203,24 +202,26 @@ func (g *Game) Update() error {
 			// Assuming a target framerate of 60, this means the tick fires once every half second
 			if tick%30 == 0 {
 				curr_self := g.selves[len(g.selves)-1]
-				past_self_pos := self.rect.Center()
-				curr_self_pos := curr_self.rect.Center()
+				if curr_self.health > 0 {
+					past_self_pos := self.rect.Center()
+					curr_self_pos := curr_self.rect.Center()
 
-				walls := g.space.FilterShapes().ByTags(tag_wall)
-				line_test_settings := resolv.LineTestSettings{Start: past_self_pos, End: curr_self_pos, TestAgainst: walls, OnIntersect: onLineIntersectDiscontinue}
-				if !resolv.LineTest(line_test_settings) {
-					fmt.Println("Past self sighted current self: time ouch!")
-					curr_self.health -= 1
-					cam.AddTrauma(0.5)
-					var sound *audio.Player
-					if curr_self.health <= 0 {
-						sound = curr_self.death_sound
-					} else {
-						sound = curr_self.hurt_sound
+					walls := g.space.FilterShapes().ByTags(tag_wall)
+					line_test_settings := resolv.LineTestSettings{Start: past_self_pos, End: curr_self_pos, TestAgainst: walls, OnIntersect: onLineIntersectDiscontinue}
+					if !resolv.LineTest(line_test_settings) {
+						fmt.Println("Past self sighted current self: time ouch!")
+						curr_self.health -= 1
+						cam.AddTrauma(0.5)
+						var sound *audio.Player
+						if curr_self.health <= 0 {
+							sound = curr_self.death_sound
+						} else {
+							sound = curr_self.hurt_sound
+						}
+						sound.Rewind()
+						sound.Play()
+
 					}
-					sound.Rewind()
-					sound.Play()
-
 				}
 			}
 		} else {
@@ -384,18 +385,19 @@ func (g *Game) Update() error {
 
 		g.giant_anim.Update()
 		if g.giant.shockwave_punch && g.giant_anim.Position() == shockwave_frame {
-			if isOnScreen(g, g.giant.rect) {
-				curr_self := g.selves[len(g.selves)-1]
-				curr_self.health -= giant_damage
-				var sound *audio.Player
-				if curr_self.health <= 0 {
-					sound = curr_self.death_sound
-				} else {
-					sound = curr_self.hurt_sound
+			for _, self := range g.selves {
+				if self.health > 0 && self.rect.DistanceTo(g.giant.rect) < shockwave_dist {
+					self.health -= giant_damage
+					var sound *audio.Player
+					if self.health <= 0 {
+						sound = self.death_sound
+					} else {
+						sound = self.hurt_sound
+					}
+					sound.Rewind()
+					sound.Play()
+					fmt.Println("Ouch!")
 				}
-				sound.Rewind()
-				sound.Play()
-				fmt.Println("Ouch!")
 			}
 			// TODO: on this frame, deliver damage to player if the player is still on-screen
 			g.giant.shockwave_punch = false
@@ -449,14 +451,18 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	}
 
 	for _, player := range g.selves {
+		var anim *ganim8.Animation
 		if player.health > 0 {
-			op.GeoM.Reset()
-			op.GeoM.Translate(player.x, player.y)
-			cam.Draw(g.player_anim[player.dir].Frame(), op, screen)
+			anim = g.player_anim[player.dir]
+		} else {
+			anim = g.player_death_anim
+		}
+		op.GeoM.Reset()
+		op.GeoM.Translate(player.x, player.y)
+		cam.Draw(anim.Frame(), op, screen)
 
-			if show_hitboxes {
-				drawHitbox(player.rect, cam, screen)
-			}
+		if show_hitboxes {
+			drawHitbox(player.rect, cam, screen)
 		}
 	}
 
@@ -541,12 +547,13 @@ func main() {
 	player := initPlayer(g)
 	g.selves = append(g.selves, player)
 
-	// 3 frame columns and 4 frame rows
-	g_pl := ganim8.NewGrid(player_w, player_h, player_w*3, player_h*4)
+	// 3 frame columns and 5 frame rows
+	g_pl := ganim8.NewGrid(player_w, player_h, player_w*3, player_h*5)
 	g.player_anim[0] = ganim8.New(character_img, g_pl.Frames("1-3", 1), anim_rate)
 	g.player_anim[1] = ganim8.New(character_img, g_pl.Frames("1-3", 2), anim_rate)
 	g.player_anim[2] = ganim8.New(character_img, g_pl.Frames("1-3", 3), anim_rate)
 	g.player_anim[3] = ganim8.New(character_img, g_pl.Frames("1-3", 4), anim_rate)
+	g.player_death_anim = ganim8.New(character_img, g_pl.Frames(1, 5), anim_rate)
 
 	giant_img := loadImg("giant.png")
 	g_gi := ganim8.NewGrid(giant_w, giant_h, giant_w*15, giant_h*1)
@@ -575,6 +582,12 @@ func main() {
 	cam.SmoothOptions.SmoothDampMaxSpeedX = 2500
 	cam.SmoothOptions.SmoothDampTimeY = 0.12
 	cam.SmoothOptions.SmoothDampMaxSpeedY = 2500
+
+	// calc shockwave dist as the dist in world coords from the top of the screen to the bottom of the screen
+	// (avoid using isOnScreen() for shockwave dist, because it only works for the current self, not past selves)
+	x1, y1 := cam.ScreenToWorld(0, 0)
+	x2, y2 := cam.ScreenToWorld(0, screen_h)
+	shockwave_dist = distance(x1, y1, x2, y2)
 
 	if err := ebiten.RunGame(g); err != nil {
 		log.Fatal(err)
@@ -696,6 +709,22 @@ func drawRedLine(x float64, y float64, x2 float64, y2 float64, cam *kamera.Camer
 // boilerplate function that tells resolve to not continue after finding the first intersection
 func onLineIntersectDiscontinue(set resolv.IntersectionSet, index, max int) bool {
 	return false
+}
+
+func distance(x1 float64, y1 float64, x2 float64, y2 float64) float64 {
+	return vectorLength(x2-x1, y2-y1)
+}
+
+func normalizeVector(x float64, y float64, desired_len float64) (float64, float64) {
+	curr_len := vectorLength(x, y)
+	if curr_len == 0 {
+		return 0, 0
+	}
+	return x * desired_len / curr_len, y * desired_len / curr_len
+}
+
+func vectorLength(x float64, y float64) float64 {
+	return math.Sqrt(x*x + y*y)
 }
 
 func check(err error) {
