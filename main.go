@@ -174,13 +174,20 @@ type Player struct {
 	num_slimes     int
 }
 
-func (self *Player) TakeDamage(damage int) {
+func (self *Player) TakeDamage(damage int, g *Game) {
 	self.health -= damage
 	var sound *audio.Player
 	if self.health <= 0 {
 		sound = self.death_snd
 		self.dx = 0
 		self.dy = 0
+		x := self.rect.Center().X
+		y := self.rect.Center().Y
+		slime := &Slime{x: x, y: y}
+		slime.rect = resolv.NewRectangleFromTopLeft(slime.x, slime.y, slime_w, slime_h)
+		slime.rect.Tags().Set(tag_collectible)
+		g.space.Add(slime.rect)
+		g.slimes = append(g.slimes, slime)
 	} else {
 		sound = self.hurt_snd
 	}
@@ -306,7 +313,7 @@ func (g *Game) Update() error {
 								return et.FinishEnd
 							})
 
-							curr_self.TakeDamage(1)
+							curr_self.TakeDamage(1, g)
 						}
 					}
 				}
@@ -391,7 +398,7 @@ func (g *Game) Update() error {
 				ix := slices.IndexFunc(g.slimes, func(s *Slime) bool {
 					return s.rect == set.OtherShape
 				})
-				if ix > -1 {
+				if ix > -1 && self.health > 0 {
 					g.slimes = slices.Delete(g.slimes, ix, ix+1)
 					g.space.Remove(set.OtherShape)
 					self.num_slimes++
@@ -522,7 +529,7 @@ func (g *Game) Update() error {
 				if self.health > 0 {
 					dist := g.giant.rect.DistanceTo(self.rect)
 					if dist < shockwave_dist {
-						self.TakeDamage(giant_damage)
+						self.TakeDamage(giant_damage, g)
 					}
 				}
 			}
