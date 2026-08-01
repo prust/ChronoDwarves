@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"embed"
+	"fmt"
 	"image/color"
 	"io/fs"
 	"log"
@@ -181,6 +182,25 @@ func (g *Game) Update() error {
 					self.hist_ix++ // advance to next history point
 				}
 			}
+			active_self := g.selves[len(g.selves)-1]
+			fmt.Println("Active self: ", active_self.rect.Center())
+			past_self_pos := self.rect.Center()
+			fmt.Println("Past self: ", past_self_pos)
+			active_self_pos := active_self.rect.Center()
+
+			shapes := make(resolv.ShapeCollection, 0, len(g.wall_rects)+1)
+
+			for _, shape := range append(g.wall_rects, active_self.rect) {
+				shapes = append(shapes, shape)
+			}
+
+			resolv.LineTest(resolv.LineTestSettings{Start: past_self_pos, End: active_self_pos, TestAgainst: shapes, OnIntersect: func(set resolv.IntersectionSet, index, max int) bool {
+				fmt.Println(set.Intersections[len(set.Intersections)-1])
+				if len(set.Intersections) == 1 {
+					fmt.Println("Player sighted")
+				}
+				return false
+			}})
 		} else {
 			// "current" self
 			// store just pressed/released action in an input history point
