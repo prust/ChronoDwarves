@@ -741,25 +741,49 @@ func main() {
 	// generate map
 	game_map = dngn.NewLayout(map_w, map_h)
 	game_map.GenerateBSP(dngn.NewDefaultBSPOptions())
-	// extend doors so they are 2 tiles high instead of just 1
-	door_select := game_map.Select().FilterByRune('#')
-	for cell := range door_select.Cells {
-		is_in_vert_wall := game_map.Get(cell.X, cell.Y-1) == 'x' && game_map.Get(cell.X, cell.Y+1) == 'x'
-		if is_in_vert_wall {
-			game_map.Set(cell.X, cell.Y-1, '#')
-		}
-	}
 
 	// line the outer border of the map with walls
 	for n := range map_w {
-		// left and right walls
+		// top wall
+		if game_map.Get(n, 0) == '#' {
+			game_map.Set(n, 1, '#') // door to be blown away, move down
+		}
 		game_map.Set(n, 0, 'x')
+
+		// bottom wall
+		if game_map.Get(n, map_h-1) == '#' {
+			game_map.Set(n, map_h-2, '#') // door to be blown away, move up
+		}
 		game_map.Set(n, map_h-1, 'x')
 	}
 	for n := range map_h {
-		// top and bottom walls
+		// left wall
+		if game_map.Get(0, n) == '#' {
+			game_map.Set(1, n, '#') // door to be blown away, move right
+		}
 		game_map.Set(0, n, 'x')
+		// right wall
+		if game_map.Get(map_w-1, n) == '#' {
+			game_map.Set(map_w-2, n, '#') // door to be blown away, move left
+		}
 		game_map.Set(map_w-1, n, 'x')
+	}
+
+	// extend doors so they are 2 tiles high instead of just 1
+	door_select := game_map.Select().FilterByRune('#')
+	for cell := range door_select.Cells {
+		is_horiz_door := game_map.Get(cell.X-1, cell.Y) == ' ' && game_map.Get(cell.X+1, cell.Y) == ' '
+		if is_horiz_door {
+			has_clearance_above := game_map.Get(cell.X-1, cell.Y-1) == ' ' && game_map.Get(cell.X+1, cell.Y-1) == ' '
+			has_clearance_below := game_map.Get(cell.X-1, cell.Y+1) == ' ' && game_map.Get(cell.X+1, cell.Y+1) == ' '
+			if has_clearance_above {
+				game_map.Set(cell.X, cell.Y-1, '#')
+			} else if has_clearance_below {
+				game_map.Set(cell.X, cell.Y+1, '#')
+			} else {
+				fmt.Println("Warning: Unable to extend door to 2 tiles high: " + string(cell.X) + "," + string(cell.Y))
+			}
+		}
 	}
 
 	// create resolv (collision detection) rectangles for walls in the grid
