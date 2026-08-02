@@ -15,10 +15,12 @@ In addition to playing the game [online](https://prust.github.io/ChronoDwarves/)
 Here are the steps:
 
 - Download & install Go: https://go.dev/dl/
+- Download the code: `git clone https://github.com/prust/ChronoDwarves.git`
+- Change to the directory: `cd ChronoDwarves`
 - Install go modules: `go mod tidy`
 - Run the game: `go run .`
 
-# How to (re)generate the WASM build (linux/unix):
+# How to (re)generate the web (WASM) build (linux/unix):
 
 ```
 env GOOS=js GOARCH=wasm go build -o ChronoDwarves.wasm github.com/prust/ChronoDwarves
