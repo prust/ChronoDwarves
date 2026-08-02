@@ -86,7 +86,6 @@ var (
 	slime_wall_snd  *audio.Player
 	ambient_snd     *audio.Player
 	red             = color.RGBA{R: 255, G: 0, B: 0, A: 100}
-	blue            = color.RGBA{R: 0, G: 0, B: 255, A: 100}
 	see_thru_blue   = color.RGBA{R: 0, G: 0, B: 255, A: 10}
 	tag_wall        = resolv.NewTag("wall")
 	tag_giant       = resolv.NewTag("giant")
@@ -145,6 +144,47 @@ func (g *Game) ResetSlimesOnMap() {
 		x, y := findEmptyCells(1, 1, g.rng)
 		g.SpawnNewSlime(float64(x * grid_size), float64(y * grid_size))
 	}
+}
+
+func (g *Game) IsLineOfSight(start resolv.Vector, end resolv.Vector) bool {
+	walls := g.space.FilterShapes().ByTags(tag_wall)
+	line_test_settings := resolv.LineTestSettings{Start: start, End: end, TestAgainst: walls, OnIntersect: onLineIntersectDiscontinue}
+	// there *is* a clear line-of-sight if there are *not* any intersections w/ walls
+	return !resolv.LineTest(line_test_settings)
+}
+
+// finds an acceptable starting position near these coordinates
+// but WITHOUT line-of-sight to ANY past selves
+func (g *Game) findStartPosNear(start_x int, start_y int) (int, int) {
+	// work in concentric "circles" (square perimiters, really)
+	// starting 2 cells away from the player
+	for dist := 2; dist < 50; dist++ {
+		for x := start_x - dist; x <= start_x+dist; x++ {
+			for y := start_y - dist; y <= start_y+dist; y++ {
+				if !inBounds(x, y) {
+					continue
+				}
+
+				// players take up two cells, so make sure x,y and x,y+1 are both clear of walls
+				if game_map.Get(x, y) == ' ' && game_map.Get(x, y+1) == ' ' {
+
+					// make sure no past selves have line-of-sight to the new position
+					// adding grid_size/2 gets us to the center of the cell
+					vec := resolv.Vector{X: float64(x*grid_size + grid_size/2), Y: float64(y*grid_size + grid_size/2)}
+					line_of_sight := false
+					for _, self := range g.selves {
+						if g.IsLineOfSight(self.rect.Position(), vec) {
+							line_of_sight = true
+						}
+					}
+					if !line_of_sight {
+						return x, y
+					}
+				}
+			}
+		}
+	}
+	panic("unable to find start position near " + string(start_x) + "," + string(start_y))
 }
 
 // each "past self" of a player is a separate Player instance
@@ -245,23 +285,8 @@ func (g *Game) Update() error {
 	show_hitboxes = g.player_input.ActionIsPressed(action_hitbox)
 
 	if g.player_input.ActionIsJustPressed(action_time_travel) {
-		tick = 0
-		g.giant.health = giant_start_health
-		g.slimes = g.slimes[:0]
-		g.selves = append(g.selves, initPlayer(g))
-
-		// reset the game's random number generator
-		source := rand.NewPCG(g.rng_seed1, g.rng_seed2)
-		g.rng = rand.New(source)
-		g.ResetSlimesOnMap()
-	}
-
-	for ix, self := range g.selves {
-		// a "past" self (replaying input history) vs "current" self (reacting to player input)
-		is_current_self := ix == len(g.selves)-1
-		is_past_self := !is_current_self
-
-		if is_past_self && g.player_input.ActionIsJustPressed(action_time_travel) {
+		// reset past selves
+		for _, self := range g.selves {
 			self.health = player_start_health
 			new_x := float64(self.start_x * grid_size)
 			new_y := float64(self.start_y * grid_size)
@@ -280,6 +305,22 @@ func (g *Game) Update() error {
 			self.is_pressed = [num_hist_actions]bool{false, false, false, false, false}
 			self.num_slimes = 0
 		}
+
+		tick = 0
+		g.giant.health = giant_start_health
+		g.slimes = g.slimes[:0]
+		g.selves = append(g.selves, initPlayer(g))
+
+		// reset the game's random number generator
+		source := rand.NewPCG(g.rng_seed1, g.rng_seed2)
+		g.rng = rand.New(source)
+		g.ResetSlimesOnMap()
+	}
+
+	for ix, self := range g.selves {
+		// a "past" self (replaying input history) vs "current" self (reacting to player input)
+		is_current_self := ix == len(g.selves)-1
+		is_past_self := !is_current_self
 
 		was_walking := self.dx != 0 || self.dy != 0
 		var hist_point InputHistoryPoint
@@ -303,9 +344,7 @@ func (g *Game) Update() error {
 					curr_self_pos := curr_self.rect.Center()
 					dist := distance(past_self_pos.X, past_self_pos.Y, curr_self_pos.X, curr_self_pos.Y)
 					if dist < max_los_dist {
-						walls := g.space.FilterShapes().ByTags(tag_wall)
-						line_test_settings := resolv.LineTestSettings{Start: past_self_pos, End: curr_self_pos, TestAgainst: walls, OnIntersect: onLineIntersectDiscontinue}
-						if !resolv.LineTest(line_test_settings) {
+						if g.IsLineOfSight(past_self_pos, curr_self_pos) {
 							fmt.Println("Past self sighted current self: time ouch!")
 							line := Line{x1: past_self_pos.X, y1: past_self_pos.Y, x2: curr_self_pos.X, y2: curr_self_pos.Y}
 
@@ -750,7 +789,12 @@ func main() {
 func initPlayer(g *Game) *Player {
 	player := &Player{health: player_start_health}
 
-	player.start_x, player.start_y = findEmptyCells(player_w/grid_size, player_h/grid_size, nil)
+	if len(g.selves) > 0 {
+		last_self := g.selves[len(g.selves)-1]
+		player.start_x, player.start_y = g.findStartPosNear(last_self.start_x, last_self.start_y)
+	} else {
+		player.start_x, player.start_y = findEmptyCells(player_w/grid_size, player_h/grid_size, nil)
+	}
 	player.x = float64(player.start_x * grid_size)
 	player.y = float64(player.start_y * grid_size)
 
@@ -774,6 +818,10 @@ func initPlayer(g *Game) *Player {
 	player.walk_anim[3] = ganim8.New(character_img, g_pl.Frames("1-3", 4), anim_rate)
 
 	return player
+}
+
+func inBounds(x int, y int) bool {
+	return x >= 0 && x < map_w && y >= 0 && y < map_h
 }
 
 // pass the # of adjacent empty cells needed (1 wide x 2 high for a player)
@@ -838,14 +886,6 @@ func isRectangleOverlap(x1 float64, y1 float64, x2 float64, y2 float64, x3 float
 
 func randomMS(min int, max int, rng *rand.Rand) time.Duration {
 	return time.Duration(rng.IntN(max-min)+min) * time.Millisecond
-}
-
-// drawRedRect() is for debugging purposes (takes world coordinates, translates to screen coords before drawing)
-func drawRedRect(x float64, y float64, x2 float64, y2 float64, cam *kamera.Camera, screen *ebiten.Image) {
-	drawLine(x, y, x2, y, red, cam, screen)
-	drawLine(x2, y, x2, y2, red, cam, screen)
-	drawLine(x2, y2, x, y2, red, cam, screen)
-	drawLine(x, y2, x, y, red, cam, screen)
 }
 
 func drawHitbox(box *resolv.ConvexPolygon, cam *kamera.Camera, screen *ebiten.Image) {
