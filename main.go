@@ -169,13 +169,20 @@ func (g *Game) findStartPosNear(start_x int, start_y int) (int, int) {
 					continue
 				}
 
-				// players take up two cells, so test x,y and x,y+1
+				// players take up two cells, so make sure x,y and x,y+1 are both clear of walls
 				if game_map.Get(x, y) == ' ' && game_map.Get(x, y+1) == ' ' {
-					vec := resolv.Vector{X: float64(x * grid_size), Y: float64(y * grid_size)}
+
+					// make sure no past selves have line-of-sight to the new position
+					// adding grid_size/2 gets us to the center of the cell
+					vec := resolv.Vector{X: float64(x*grid_size + grid_size/2), Y: float64(y*grid_size + grid_size/2)}
+					line_of_sight := false
 					for _, self := range g.selves {
-						if !g.IsLineOfSight(self.rect.Position(), vec) {
-							return x, y
+						if g.IsLineOfSight(self.rect.Position(), vec) {
+							line_of_sight = true
 						}
+					}
+					if !line_of_sight {
+						return x, y
 					}
 				}
 			}
@@ -267,23 +274,8 @@ func (g *Game) Update() error {
 	show_hitboxes = g.player_input.ActionIsPressed(action_hitbox)
 
 	if g.player_input.ActionIsJustPressed(action_time_travel) {
-		tick = 0
-		g.giant.health = giant_start_health
-		g.slimes = g.slimes[:0]
-		g.selves = append(g.selves, initPlayer(g))
-
-		// reset the game's random number generator
-		source := rand.NewPCG(g.rng_seed1, g.rng_seed2)
-		g.rng = rand.New(source)
-		g.ResetSlimesOnMap()
-	}
-
-	for ix, self := range g.selves {
-		// a "past" self (replaying input history) vs "current" self (reacting to player input)
-		is_current_self := ix == len(g.selves)-1
-		is_past_self := !is_current_self
-
-		if is_past_self && g.player_input.ActionIsJustPressed(action_time_travel) {
+		// reset past selves
+		for _, self := range g.selves {
 			self.health = player_start_health
 			new_x := float64(self.start_x * grid_size)
 			new_y := float64(self.start_y * grid_size)
@@ -302,6 +294,22 @@ func (g *Game) Update() error {
 			self.is_pressed = [num_hist_actions]bool{false, false, false, false, false}
 			self.num_slimes = 0
 		}
+
+		tick = 0
+		g.giant.health = giant_start_health
+		g.slimes = g.slimes[:0]
+		g.selves = append(g.selves, initPlayer(g))
+
+		// reset the game's random number generator
+		source := rand.NewPCG(g.rng_seed1, g.rng_seed2)
+		g.rng = rand.New(source)
+		g.ResetSlimesOnMap()
+	}
+
+	for ix, self := range g.selves {
+		// a "past" self (replaying input history) vs "current" self (reacting to player input)
+		is_current_self := ix == len(g.selves)-1
+		is_past_self := !is_current_self
 
 		was_walking := self.dx != 0 || self.dy != 0
 		var hist_point InputHistoryPoint
