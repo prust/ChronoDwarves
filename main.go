@@ -103,6 +103,7 @@ var (
 	slime_giant_snd      *audio.Player
 	slime_wall_snd       *audio.Player
 	ambient_snd          *audio.Player
+	ambient_boss_snd     *audio.Player
 	red                  = color.RGBA{R: 255, G: 0, B: 0, A: 100}
 	see_thru_grey        = color.RGBA{R: 100, G: 100, B: 100, A: 170}
 	see_thru_red         = color.RGBA{R: 255, G: 0, B: 0, A: 50}
@@ -643,6 +644,17 @@ func (g *Game) Update() error {
 		}
 	}
 
+	curr_self := g.selves[len(g.selves)-1]
+	var boss_volume float64
+	if curr_self.rect.IsContainedBy(g.giants_rm_rect) {
+		boss_volume = 1
+	} else {
+		boss_volume = 0
+	}
+	if ambient_boss_snd.Volume() != boss_volume {
+		ambient_boss_snd.SetVolume(boss_volume)
+	}
+
 	// iterate backwards so we can safely remove them w/out messing up iteration
 	for i, slime := range slices.Backward(g.slimes) {
 		// skip slimes lying on the ground
@@ -1002,10 +1014,16 @@ func main() {
 	slime_giant_snd = g.LoadSoundPlayer("hit_giant.wav")
 	slime_wall_snd = g.LoadSoundPlayer("hit_wall.wav")
 	ambient_wav := loadWav("ambient.wav")
+	ambient_boss_wav := loadWav("ambient_boss.wav")
 	loop_ambient := audio.NewInfiniteLoop(ambient_wav, ambient_wav.Length())
+	loop_ambient_boss := audio.NewInfiniteLoop(ambient_boss_wav, ambient_boss_wav.Length())
 	ambient_snd, err = g.audio_context.NewPlayerF32(loop_ambient)
 	check(err)
+	ambient_boss_snd, err = g.audio_context.NewPlayerF32(loop_ambient_boss)
+	check(err)
 	ambient_snd.Play()
+	ambient_boss_snd.Play()
+	ambient_boss_snd.SetVolume(0)
 
 	g.player_input = g.input_system.NewHandler(0, keymap)
 	player := initPlayer(g)
