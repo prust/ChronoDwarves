@@ -597,6 +597,8 @@ func (g *Game) Update() error {
 							// to keep it centered, since it's shrinking
 							slime.x += 2
 							slime.y += 2
+							slime.dx = 0
+							slime.dy = 0
 						}
 						// TODO: play slime-hitting sound
 					}
