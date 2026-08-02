@@ -102,7 +102,7 @@ var (
 	slime_wall_snd       *audio.Player
 	ambient_snd          *audio.Player
 	red                  = color.RGBA{R: 255, G: 0, B: 0, A: 100}
-	see_thru_grey        = color.RGBA{R: 153, G: 153, B: 153, A: 170}
+	see_thru_grey        = color.RGBA{R: 100, G: 100, B: 100, A: 170}
 	see_thru_red         = color.RGBA{R: 255, G: 0, B: 0, A: 50}
 	see_thru_black       = color.RGBA{R: 0, G: 0, B: 0, A: 150}
 	tag_wall             = resolv.NewTag("wall")
@@ -743,23 +743,39 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	x2, y2 := cam.ScreenToWorld(g.screen_w, g.screen_h)
 
 	// draw the map
-	map_select := game_map.Select()
 	op := &ebiten.DrawImageOptions{}
-	for cell := range map_select.Cells {
-		// cull (only draw what's actually on-screen to avoid 100% CPU usage)
-		if isRectangleOverlap(x1, y1, x2, y2, float64(cell.X*grid_size), float64(cell.Y*grid_size), float64(cell.X*grid_size+grid_size), float64(cell.Y*grid_size+grid_size)) {
-			op.GeoM.Reset()
-			op.GeoM.Translate(float64(cell.X*grid_size), float64(cell.Y*grid_size))
-			// smooth anti-aliasing (and so ebitengine batches calls due to identical Filter param)
-			// op.Filter = ebiten.FilterLinear
+	for x := range map_w {
+		for y := range map_h {
+			// cull (only draw what's actually on-screen to avoid 100% CPU usage)
+			if isRectangleOverlap(x1, y1, x2, y2, float64(x*grid_size), float64(y*grid_size), float64(x*grid_size+grid_size), float64(y*grid_size+grid_size)) {
+				op.GeoM.Reset()
+				op.GeoM.Translate(float64(x*grid_size), float64(y*grid_size))
+				// smooth anti-aliasing (and so ebitengine batches calls due to identical Filter param)
+				// op.Filter = ebiten.FilterLinear
 
-			v := game_map.Get(cell.X, cell.Y)
-			if v == 'x' {
-				cam.Draw(wall_img, op, screen)
-			} else if v == ' ' {
-				cam.Draw(floor_img, op, screen)
-			} else if v == '#' {
-				cam.Draw(door_img, op, screen)
+				v := game_map.Get(x, y)
+				if v == ' ' {
+					cam.Draw(floor_img, op, screen)
+				} else if v == '#' {
+					cam.Draw(door_img, op, screen)
+				}
+			}
+		}
+	}
+
+	// draw the walls on a second pass, so you can see the front of them
+	for x := range map_w {
+		for y := range map_h {
+			// cull (only draw what's actually on-screen to avoid 100% CPU usage)
+			if isRectangleOverlap(x1, y1, x2, y2, float64(x*grid_size), float64(y*grid_size), float64(x*grid_size+grid_size), float64(y*grid_size+grid_size)) {
+				v := game_map.Get(x, y)
+				if v == 'x' {
+					op.GeoM.Reset()
+					op.GeoM.Translate(float64(x*grid_size), float64(y*grid_size))
+					// smooth anti-aliasing (and so ebitengine batches calls due to identical Filter param)
+					// op.Filter = ebiten.FilterLinear
+					cam.Draw(wall_img, op, screen)
+				}
 			}
 		}
 	}
@@ -941,7 +957,7 @@ func main() {
 
 	// load images/spritesheets
 	character_img = loadImg("dwarf_character.png")
-	wall_img = loadImg("wall.png")
+	wall_img = loadImg("WallTall.png")
 	door_img = loadImg("door.png")
 	floor_img = loadImg("floor.png")
 	sm_slime_img = loadImg("sm_slime.png")
