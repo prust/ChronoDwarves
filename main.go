@@ -645,7 +645,7 @@ func (g *Game) Update() error {
 			slime.rect.IntersectionTest(resolv.IntersectionTestSettings{
 				TestAgainst: near_shapes.ByTags(tag_wall | tag_giant),
 				OnIntersect: func(set resolv.IntersectionSet) bool {
-					if set.OtherShape.Tags().Has(tag_giant) {
+					if set.OtherShape.Tags().Has(tag_giant) && slime.health <= 0 {
 						hit_giant = true
 						slime_giant_snd.Rewind()
 						slime_giant_snd.Play()
