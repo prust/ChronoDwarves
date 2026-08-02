@@ -124,6 +124,7 @@ type Game struct {
 	rng_seed2         uint64
 	rng               *rand.Rand
 	giants_room       *dngn.BSPRoom
+	giants_rm_rect    *resolv.ConvexPolygon
 }
 
 // set volume based on nearness of the player, max_dist cells away = 0%, 0 cells away = 100%
@@ -248,7 +249,6 @@ func (self *Player) TakeDamage(damage int, g *Game) {
 	}
 	sound.Rewind()
 	sound.Play()
-	fmt.Println("Ouch!")
 }
 
 // get the 2 points at the edge of the player's field of view (FOV)
@@ -390,12 +390,16 @@ func (g *Game) Update() error {
 							// resolv doesn't consider it an intersection if one shape is wholly contained by another
 							// so we have to do two checks here
 							if fov.IsIntersecting(curr_self.rect) || curr_self.rect.IsContainedBy(fov) {
-								curr_self.TakeDamage(1, g)
-								self.red_fov = true
-								g.timer_system.AfterDuration(500*time.Millisecond, func(_ *et.Timer, _ int) et.FinishMode {
-									self.red_fov = false
-									return et.FinishEnd
-								})
+
+								// make sure the curr_self isn't in the giants' lair (no past-self-damage there)
+								if !curr_self.rect.IsContainedBy(g.giants_rm_rect) {
+									curr_self.TakeDamage(1, g)
+									self.red_fov = true
+									g.timer_system.AfterDuration(500*time.Millisecond, func(_ *et.Timer, _ int) et.FinishMode {
+										self.red_fov = false
+										return et.FinishEnd
+									})
+								}
 							}
 						}
 					}
@@ -679,25 +683,27 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	for ix, player := range g.selves {
 		is_past_self := ix < len(g.selves)-1
 		if is_past_self && player.health > 0 {
-			x1, y1, x2, y2 := player.GetFOVPoints()
+			if !player.rect.IsContainedBy(g.giants_rm_rect) {
+				x1, y1, x2, y2 := player.GetFOVPoints()
 
-			x_cam, y_cam := cam.ApplyCameraTransformToPoint(player.rect.Position().X, player.rect.Position().Y)
-			x1_cam, y1_cam := cam.ApplyCameraTransformToPoint(x1, y1)
-			x2_cam, y2_cam := cam.ApplyCameraTransformToPoint(x2, y2)
+				x_cam, y_cam := cam.ApplyCameraTransformToPoint(player.rect.Position().X, player.rect.Position().Y)
+				x1_cam, y1_cam := cam.ApplyCameraTransformToPoint(x1, y1)
+				x2_cam, y2_cam := cam.ApplyCameraTransformToPoint(x2, y2)
 
-			var path vector.Path
-			path.MoveTo(float32(x_cam), float32(y_cam))
-			path.LineTo(float32(x1_cam), float32(y1_cam))
-			path.LineTo(float32(x2_cam), float32(y2_cam))
-			path.Close()
+				var path vector.Path
+				path.MoveTo(float32(x_cam), float32(y_cam))
+				path.LineTo(float32(x1_cam), float32(y1_cam))
+				path.LineTo(float32(x2_cam), float32(y2_cam))
+				path.Close()
 
-			ops := &vector.DrawPathOptions{}
-			if player.red_fov {
-				ops.ColorScale.ScaleWithColor(see_thru_red)
-			} else {
-				ops.ColorScale.ScaleWithColor(see_thru_grey)
+				ops := &vector.DrawPathOptions{}
+				if player.red_fov {
+					ops.ColorScale.ScaleWithColor(see_thru_red)
+				} else {
+					ops.ColorScale.ScaleWithColor(see_thru_grey)
+				}
+				vector.FillPath(screen, &path, nil, ops)
 			}
-			vector.FillPath(screen, &path, nil, ops)
 		}
 
 		var anim *ganim8.Animation
@@ -721,7 +727,6 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		cam.Draw(slime_img, op, screen)
 	}
 
-	// fmt.Println(g.giants_room.X, g.giants_room.Y, g.giants_room.W, g.giants_room.H)
 	rm_x1, rm_y1 := cam.ApplyCameraTransformToPoint(float64(g.giants_room.X*grid_size), float64(g.giants_room.Y*grid_size))
 	cell_x2, cell_y2 := g.giants_room.X+g.giants_room.W+1, g.giants_room.Y+g.giants_room.H+1
 	rm_x2, rm_y2 := cam.ApplyCameraTransformToPoint(float64(cell_x2*grid_size), float64(cell_y2*grid_size))
@@ -748,7 +753,7 @@ func main() {
 
 	// generate map
 	game_map = dngn.NewLayout(map_w, map_h)
-	rooms := game_map.GenerateBSP(dngn.NewDefaultBSPOptions())
+	rms := game_map.GenerateBSP(dngn.NewDefaultBSPOptions())
 
 	// line the outer border of the map with walls
 	for n := range map_w {
@@ -861,14 +866,15 @@ func main() {
 	g.space.Add(g.giant.rect)
 
 	// figure out which room is the giants' & store it
-	ix := slices.IndexFunc(rooms, func(room *dngn.BSPRoom) bool {
+	ix := slices.IndexFunc(rms, func(room *dngn.BSPRoom) bool {
 		return x > room.X && x < room.X+room.W &&
 			y > room.Y && y < room.Y+room.H
 	})
 	if ix == -1 {
 		panic("Giant's room not located: " + string(x) + "," + string(y))
 	}
-	g.giants_room = rooms[ix]
+	g.giants_room = rms[ix]
+	g.giants_rm_rect = resolv.NewRectangleFromTopLeft(float64(rms[ix].X*grid_size), float64(rms[ix].Y*grid_size), float64((rms[ix].W+1)*grid_size), float64((rms[ix].H+1)*grid_size))
 
 	cam = kamera.NewCamera(player.x, player.y, float64(g.screen_w), float64(g.screen_h))
 	camera_shake_options := kamera.DefaultCameraShakeOptions()
