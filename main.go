@@ -254,8 +254,14 @@ func (g *Game) SpawnNewSlime(x, y float64, is_alive bool) *Slime {
 					slime.dx = 0
 					slime.dy = 0
 				} else {
-					slime.dx = float64(rnd_x - 1)
-					slime.dy = float64(rnd_y - 1)
+					// restrict slimes to just horiz or just vert movement
+					if rnd_x != 0 {
+						slime.dx = float64(rnd_x - 1)
+						slime.dy = 0
+					} else {
+						slime.dx = 0
+						slime.dy = float64(rnd_y - 1)
+					}
 				}
 			}
 			return et.FinishLoop
