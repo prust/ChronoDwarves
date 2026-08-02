@@ -40,8 +40,7 @@ const (
 	action_cam_reset
 	action_hitbox
 	action_time_travel
-	num_hist_actions = 5
-
+	num_hist_actions       = 5
 	sample_rate            = 48000
 	anim_rate              = time.Second / 8  // 8fps pixel art animation (looping 3-frame walk cycles)
 	giant_anim_rate        = time.Second / 24 // probably too many frames in this animation, play it faster
@@ -69,6 +68,15 @@ const (
 	num_slimes_on_map      = 25
 )
 
+type Direction int
+
+const (
+	down Direction = iota // must be in a new const block to restart
+	right
+	left
+	up
+)
+
 var (
 	hist_actions    = [num_hist_actions]input.Action{action_left, action_right, action_up, action_down, action_throw_slime}
 	cam             *kamera.Camera
@@ -87,12 +95,13 @@ var (
 	ambient_snd     *audio.Player
 	red             = color.RGBA{R: 255, G: 0, B: 0, A: 100}
 	see_thru_blue   = color.RGBA{R: 0, G: 0, B: 255, A: 10}
+	see_thru_grey   = color.RGBA{R: 153, G: 153, B: 153, A: 170}
 	tag_wall        = resolv.NewTag("wall")
 	tag_giant       = resolv.NewTag("giant")
 	tag_collectible = resolv.NewTag("collectible")
 	shockwave_dist  = float64(grid_size * 10)
 	throw_dist      = float64(grid_size * 5)
-	max_los_dist    = float64(grid_size * 5)
+	max_los_dist    = float64(grid_size * 8)
 )
 
 type Game struct {
@@ -142,7 +151,7 @@ func (g *Game) LoadSoundPlayer(filename string) *audio.Player {
 func (g *Game) ResetSlimesOnMap() {
 	for range num_slimes_on_map {
 		x, y := findEmptyCells(1, 1, g.rng)
-		g.SpawnNewSlime(float64(x * grid_size), float64(y * grid_size))
+		g.SpawnNewSlime(float64(x*grid_size), float64(y*grid_size))
 	}
 }
 
@@ -197,7 +206,7 @@ type Player struct {
 	dx             float64 // delta position (velocity)
 	dy             float64
 	rect           *resolv.ConvexPolygon // DRY violation w/ x,y -- should we solely use the collision lib rect?
-	dir            int                   // direction player is facing (indexes the animation array)
+	dir            Direction             // direction player is facing (indexes the animation array)
 	walk_snd       *audio.Player
 	hurt_snd       *audio.Player
 	death_snd      *audio.Player
@@ -238,6 +247,31 @@ func (self *Player) TakeDamage(damage int, g *Game) {
 	sound.Rewind()
 	sound.Play()
 	fmt.Println("Ouch!")
+}
+
+// get the 2 points at the edge of the player's field of view (FOV)
+func (self *Player) GetFOVPoints() (float64, float64, float64, float64) {
+	x, y := self.rect.Position().X, self.rect.Position().Y
+	rt_x, dwn_y := normalizeVector(1, 1, max_los_dist)
+	var x1, y1, x2, y2 float64
+	if self.dir == down || self.dir == right {
+		x1, y1 = x+rt_x, y+dwn_y // down-right
+	} else { // up || left
+		x1, y1 = x-rt_x, y-dwn_y // up-left
+	}
+	if self.dir == down || self.dir == left {
+		x2, y2 = x-rt_x, y+dwn_y // down-left
+	} else { // up || right
+		x2, y2 = x+rt_x, y-dwn_y // up-right
+	}
+
+	// return the points in clockwise order (requires flipping them for left/right)
+	// this is important for NewConvexPolygon (downstream)
+	if self.dir == down || self.dir == up {
+		return x1, y1, x2, y2
+	} else {
+		return x2, y2, x1, y1
+	}
 }
 
 // the game's tick increments 60x/sec
@@ -344,19 +378,29 @@ func (g *Game) Update() error {
 					curr_self_pos := curr_self.rect.Center()
 					dist := distance(past_self_pos.X, past_self_pos.Y, curr_self_pos.X, curr_self_pos.Y)
 					if dist < max_los_dist {
+						// check line-of-sight (to make sure there's not a wall is in the way)
 						if g.IsLineOfSight(past_self_pos, curr_self_pos) {
-							fmt.Println("Past self sighted current self: time ouch!")
-							line := Line{x1: past_self_pos.X, y1: past_self_pos.Y, x2: curr_self_pos.X, y2: curr_self_pos.Y}
+							// and check field-of-view overlap (to check the viewing angle)
+							x, y := past_self_pos.X, past_self_pos.Y
+							x1, y1, x2, y2 := self.GetFOVPoints()
+							fov := resolv.NewConvexPolygon(0, 0, []float64{x, y, x1, y1, x2, y2})
 
-							g.los_lines = append(g.los_lines, line)
-							g.timer_system.AfterDuration(300*time.Millisecond, func(_ *et.Timer, _ int) et.FinishMode {
-								g.los_lines = slices.DeleteFunc(g.los_lines, func(l Line) bool {
-									return l == line
+							// resolv doesn't consider it an intersection if one shape is wholly contained by another
+							// so we have to do two checks here
+							if fov.IsIntersecting(curr_self.rect) || curr_self.rect.IsContainedBy(fov) {
+								fmt.Println("Past self sighted current self: time ouch!")
+								line := Line{x1: past_self_pos.X, y1: past_self_pos.Y, x2: curr_self_pos.X, y2: curr_self_pos.Y}
+
+								g.los_lines = append(g.los_lines, line)
+								g.timer_system.AfterDuration(300*time.Millisecond, func(_ *et.Timer, _ int) et.FinishMode {
+									g.los_lines = slices.DeleteFunc(g.los_lines, func(l Line) bool {
+										return l == line
+									})
+									return et.FinishEnd
 								})
-								return et.FinishEnd
-							})
 
-							curr_self.TakeDamage(1, g)
+								curr_self.TakeDamage(1, g)
+							}
 						}
 					}
 				}
@@ -452,23 +496,23 @@ func (g *Game) Update() error {
 		})
 
 		if hist_point.just_pressed[action_down] {
-			self.dir = 0
+			self.dir = down
 		} else if hist_point.just_pressed[action_right] {
-			self.dir = 1
+			self.dir = right
 		} else if hist_point.just_pressed[action_left] {
-			self.dir = 2
+			self.dir = left
 		} else if hist_point.just_pressed[action_up] {
-			self.dir = 3
+			self.dir = up
 		} else if hist_point.just_released[action_down] || hist_point.just_released[action_right] || hist_point.just_released[action_left] || hist_point.just_released[action_up] {
 			// if the player just released a key, change direction based on any other key that is still pressed
 			if self.is_pressed[action_down] {
-				self.dir = 0
+				self.dir = down
 			} else if self.is_pressed[action_right] {
-				self.dir = 1
+				self.dir = right
 			} else if self.is_pressed[action_left] {
-				self.dir = 2
+				self.dir = left
 			} else if self.is_pressed[action_up] {
-				self.dir = 3
+				self.dir = up
 			}
 		}
 
@@ -630,7 +674,26 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		}
 	}
 
-	for _, player := range g.selves {
+	for ix, player := range g.selves {
+		is_past_self := ix < len(g.selves)-1
+		if is_past_self && player.health > 0 {
+			x1, y1, x2, y2 := player.GetFOVPoints()
+
+			x_cam, y_cam := cam.ApplyCameraTransformToPoint(player.rect.Position().X, player.rect.Position().Y)
+			x1_cam, y1_cam := cam.ApplyCameraTransformToPoint(x1, y1)
+			x2_cam, y2_cam := cam.ApplyCameraTransformToPoint(x2, y2)
+
+			var path vector.Path
+			path.MoveTo(float32(x_cam), float32(y_cam))
+			path.LineTo(float32(x1_cam), float32(y1_cam))
+			path.LineTo(float32(x2_cam), float32(y2_cam))
+			path.Close()
+
+			ops := &vector.DrawPathOptions{}
+			ops.ColorScale.ScaleWithColor(see_thru_grey)
+			vector.FillPath(screen, &path, nil, ops)
+		}
+
 		var anim *ganim8.Animation
 		if player.health > 0 {
 			anim = player.walk_anim[player.dir]
