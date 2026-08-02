@@ -96,6 +96,7 @@ var (
 	red             = color.RGBA{R: 255, G: 0, B: 0, A: 100}
 	see_thru_blue   = color.RGBA{R: 0, G: 0, B: 255, A: 10}
 	see_thru_grey   = color.RGBA{R: 153, G: 153, B: 153, A: 170}
+	see_thru_red    = color.RGBA{R: 255, G: 0, B: 0, A: 50}
 	tag_wall        = resolv.NewTag("wall")
 	tag_giant       = resolv.NewTag("giant")
 	tag_collectible = resolv.NewTag("collectible")
@@ -118,7 +119,6 @@ type Game struct {
 	wall_rects        []*resolv.ConvexPolygon
 	slimes            []*Slime
 	timer_system      *et.TimerSystem
-	los_lines         []Line // line-of-sight lines, for display
 	shock_circle      bool
 	rng_seed1         uint64
 	rng_seed2         uint64
@@ -217,6 +217,7 @@ type Player struct {
 	walk_anim      [4]*ganim8.Animation // an animation for each of the 4 directions
 	throw_cooldown bool
 	num_slimes     int
+	red_fov        bool
 }
 
 func (g *Game) SpawnNewSlime(x, y float64) {
@@ -370,8 +371,7 @@ func (g *Game) Update() error {
 				}
 			}
 
-			// Assuming a target framerate of 60, this means the tick fires once every half second
-			if tick%30 == 0 {
+			if !self.red_fov {
 				curr_self := g.selves[len(g.selves)-1]
 				if curr_self.health > 0 && self.health > 0 {
 					past_self_pos := self.rect.Center()
@@ -388,18 +388,12 @@ func (g *Game) Update() error {
 							// resolv doesn't consider it an intersection if one shape is wholly contained by another
 							// so we have to do two checks here
 							if fov.IsIntersecting(curr_self.rect) || curr_self.rect.IsContainedBy(fov) {
-								fmt.Println("Past self sighted current self: time ouch!")
-								line := Line{x1: past_self_pos.X, y1: past_self_pos.Y, x2: curr_self_pos.X, y2: curr_self_pos.Y}
-
-								g.los_lines = append(g.los_lines, line)
-								g.timer_system.AfterDuration(300*time.Millisecond, func(_ *et.Timer, _ int) et.FinishMode {
-									g.los_lines = slices.DeleteFunc(g.los_lines, func(l Line) bool {
-										return l == line
-									})
+								curr_self.TakeDamage(1, g)
+								self.red_fov = true
+								g.timer_system.AfterDuration(500*time.Millisecond, func(_ *et.Timer, _ int) et.FinishMode {
+									self.red_fov = false
 									return et.FinishEnd
 								})
-
-								curr_self.TakeDamage(1, g)
 							}
 						}
 					}
@@ -690,7 +684,11 @@ func (g *Game) Draw(screen *ebiten.Image) {
 			path.Close()
 
 			ops := &vector.DrawPathOptions{}
-			ops.ColorScale.ScaleWithColor(see_thru_grey)
+			if player.red_fov {
+				ops.ColorScale.ScaleWithColor(see_thru_red)
+			} else {
+				ops.ColorScale.ScaleWithColor(see_thru_grey)
+			}
 			vector.FillPath(screen, &path, nil, ops)
 		}
 
@@ -707,11 +705,6 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		if show_hitboxes {
 			drawHitbox(player.rect, cam, screen)
 		}
-	}
-
-	// line-of-sight lines & shock lines
-	for _, line := range g.los_lines {
-		drawLine(line.x1, line.y1, line.x2, line.y2, red, cam, screen)
 	}
 
 	for _, slime := range g.slimes {
