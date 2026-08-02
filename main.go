@@ -316,6 +316,7 @@ type InputHistoryPoint struct {
 	just_released [num_hist_actions]bool
 	mouse_x       float64
 	mouse_y       float64
+	curr_health   int
 }
 
 type Giant struct {
@@ -404,7 +405,8 @@ func (g *Game) Update() error {
 				next_up_hist_point := self.history[self.hist_ix]
 				if next_up_hist_point.tick == tick {
 					hist_point = next_up_hist_point
-					self.hist_ix++ // advance to next history point
+					self.hist_ix++                       // advance to next history point
+					self.health = hist_point.curr_health // fudgy cheat: force-update the health in case something got off
 				}
 			}
 
@@ -444,7 +446,7 @@ func (g *Game) Update() error {
 			// "current" self
 			// store just pressed/released action in an input history point
 			// *if* the player is still alive
-			hist_point = InputHistoryPoint{tick: tick}
+			hist_point = InputHistoryPoint{tick: tick, curr_health: self.health}
 			if self.health > 0 {
 				input_changed := false
 				for _, action := range hist_actions {
