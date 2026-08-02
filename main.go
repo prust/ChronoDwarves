@@ -96,6 +96,7 @@ var (
 	red             = color.RGBA{R: 255, G: 0, B: 0, A: 100}
 	see_thru_grey   = color.RGBA{R: 153, G: 153, B: 153, A: 170}
 	see_thru_red    = color.RGBA{R: 255, G: 0, B: 0, A: 50}
+	see_thru_black  = color.RGBA{R: 0, G: 0, B: 0, A: 150}
 	tag_wall        = resolv.NewTag("wall")
 	tag_giant       = resolv.NewTag("giant")
 	tag_collectible = resolv.NewTag("collectible")
@@ -122,6 +123,7 @@ type Game struct {
 	rng_seed1         uint64
 	rng_seed2         uint64
 	rng               *rand.Rand
+	giants_room       *dngn.BSPRoom
 }
 
 // set volume based on nearness of the player, max_dist cells away = 0%, 0 cells away = 100%
@@ -718,6 +720,12 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		op.GeoM.Translate(slime.x, slime.y)
 		cam.Draw(slime_img, op, screen)
 	}
+
+	// fmt.Println(g.giants_room.X, g.giants_room.Y, g.giants_room.W, g.giants_room.H)
+	rm_x1, rm_y1 := cam.ApplyCameraTransformToPoint(float64(g.giants_room.X*grid_size), float64(g.giants_room.Y*grid_size))
+	cell_x2, cell_y2 := g.giants_room.X+g.giants_room.W+1, g.giants_room.Y+g.giants_room.H+1
+	rm_x2, rm_y2 := cam.ApplyCameraTransformToPoint(float64(cell_x2*grid_size), float64(cell_y2*grid_size))
+	vector.FillRect(screen, float32(rm_x1), float32(rm_y1), float32(rm_x2-rm_x1), float32(rm_y2-rm_y1), see_thru_black, false)
 }
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (screenWidth, screenHeight int) {
@@ -740,7 +748,7 @@ func main() {
 
 	// generate map
 	game_map = dngn.NewLayout(map_w, map_h)
-	game_map.GenerateBSP(dngn.NewDefaultBSPOptions())
+	rooms := game_map.GenerateBSP(dngn.NewDefaultBSPOptions())
 
 	// line the outer border of the map with walls
 	for n := range map_w {
@@ -851,6 +859,16 @@ func main() {
 	g.giant.rect = resolv.NewRectangleFromTopLeft(g.giant.x+3, g.giant.y+16, giant_w-4, giant_h-18)
 	g.giant.rect.Tags().Set(tag_giant)
 	g.space.Add(g.giant.rect)
+
+	// figure out which room is the giants' & store it
+	ix := slices.IndexFunc(rooms, func(room *dngn.BSPRoom) bool {
+		return x > room.X && x < room.X+room.W &&
+			y > room.Y && y < room.Y+room.H
+	})
+	if ix == -1 {
+		panic("Giant's room not located: " + string(x) + "," + string(y))
+	}
+	g.giants_room = rooms[ix]
 
 	cam = kamera.NewCamera(player.x, player.y, float64(g.screen_w), float64(g.screen_h))
 	camera_shake_options := kamera.DefaultCameraShakeOptions()
