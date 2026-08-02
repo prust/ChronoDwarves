@@ -94,7 +94,6 @@ var (
 	slime_wall_snd  *audio.Player
 	ambient_snd     *audio.Player
 	red             = color.RGBA{R: 255, G: 0, B: 0, A: 100}
-	see_thru_blue   = color.RGBA{R: 0, G: 0, B: 255, A: 10}
 	see_thru_grey   = color.RGBA{R: 153, G: 153, B: 153, A: 170}
 	see_thru_red    = color.RGBA{R: 255, G: 0, B: 0, A: 50}
 	tag_wall        = resolv.NewTag("wall")
@@ -292,6 +291,7 @@ type Giant struct {
 	rect            *resolv.ConvexPolygon
 	shockwave_punch bool
 	shockwave_timer *et.Timer
+	red_shockwave   bool
 }
 
 type Slime struct {
@@ -603,6 +603,7 @@ func (g *Game) Update() error {
 			g.shock_circle = true
 			g.timer_system.AfterDuration(300*time.Millisecond, func(_ *et.Timer, _ int) et.FinishMode {
 				g.shock_circle = false
+				g.giant.red_shockwave = false
 				return et.FinishEnd
 			})
 
@@ -610,6 +611,7 @@ func (g *Game) Update() error {
 				if self.health > 0 {
 					dist := g.giant.rect.DistanceTo(self.rect)
 					if dist < shockwave_dist {
+						g.giant.red_shockwave = true
 						self.TakeDamage(giant_damage, g)
 					}
 				}
@@ -664,7 +666,11 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		cam.Draw(g.giant_anim.Frame(), op, screen)
 		x, y := cam.ApplyCameraTransformToPoint(g.giant.rect.Position().X, g.giant.rect.Position().Y)
 		if g.shock_circle {
-			vector.FillCircle(screen, float32(x), float32(y), float32(shockwave_dist), see_thru_blue, false)
+			if g.giant.red_shockwave {
+				vector.FillCircle(screen, float32(x), float32(y), float32(shockwave_dist), see_thru_red, false)
+			} else {
+				vector.FillCircle(screen, float32(x), float32(y), float32(shockwave_dist), see_thru_grey, false)
+			}
 		}
 	}
 
