@@ -246,7 +246,7 @@ func (g *Game) SpawnNewSlime(x, y float64, is_alive bool) *Slime {
 		slime.health = slime_start_health
 		slime.rect.Tags().Set(tag_live_slime)
 		ms := g.rng.IntN(200)
-		g.timer_system.AfterDuration((100+time.Duration(ms))*time.Millisecond, func(_ *et.Timer, _ int) et.FinishMode {
+		g.timer_system.AfterDuration((300+time.Duration(ms))*time.Millisecond, func(_ *et.Timer, _ int) et.FinishMode {
 			// always generate these random numbers, regardless of outside happenings, to keep RNG in sync
 			rnd_x, rnd_y := g.rng.IntN(3), g.rng.IntN(3)
 			if slime.health > 0 {
@@ -255,7 +255,7 @@ func (g *Game) SpawnNewSlime(x, y float64, is_alive bool) *Slime {
 					slime.dy = 0
 				} else {
 					// restrict slimes to just horiz or just vert movement
-					if rnd_x != 0 {
+					if g.rng.IntN(2) == 0 {
 						slime.dx = float64(rnd_x - 1)
 						slime.dy = 0
 					} else {
