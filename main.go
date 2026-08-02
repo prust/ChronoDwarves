@@ -613,12 +613,18 @@ func (g *Game) Update() error {
 				return et.FinishEnd
 			})
 
-			for _, self := range g.selves {
+			for ix, self := range g.selves {
+				is_current_self := ix == len(g.selves)-1
 				if self.health > 0 {
 					dist := g.giant.rect.DistanceTo(self.rect)
 					if dist < shockwave_dist {
-						g.giant.red_shockwave = true
-						self.TakeDamage(giant_damage, g)
+						if g.IsLineOfSight(self.rect.Center(), g.giant.rect.Center()) {
+							self.TakeDamage(giant_damage, g)
+							if is_current_self {
+								g.giant.red_shockwave = true
+							}
+
+						}
 					}
 				}
 			}
