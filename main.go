@@ -94,6 +94,8 @@ var (
 	lg_slime_damage_img  *ebiten.Image
 	med_slime_img        *ebiten.Image
 	med_slime_damage_img *ebiten.Image
+	ammo_counter_img     *ebiten.Image
+	ammo_counter_w       float64 = 32
 	is_cam_reset         bool
 	show_hitboxes        bool
 	tick                 int // tick starts at 0, increments 60x/sec, and resets to 0 when you go back in time
@@ -120,6 +122,7 @@ type Game struct {
 	player_death_anim *ganim8.Animation
 	giant             *Giant
 	giant_anim        *ganim8.Animation // one animation for the giant's shockwave punch
+	ammo_anim         *ganim8.Animation
 	screen_w          int
 	screen_h          int
 	input_system      input.System
@@ -875,6 +878,15 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	cell_x2, cell_y2 := g.giants_room.X+g.giants_room.W+1, g.giants_room.Y+g.giants_room.H+1
 	rm_x2, rm_y2 := cam.ApplyCameraTransformToPoint(float64(cell_x2*grid_size), float64(cell_y2*grid_size))
 	vector.FillRect(screen, float32(rm_x1), float32(rm_y1), float32(rm_x2-rm_x1), float32(rm_y2-rm_y1), see_thru_black, false)
+
+	// HUD items (draw last)
+	ammo_frame := min(curr_player.num_slimes+1, 11) // frames are one-based
+	if g.ammo_anim.Position() != ammo_frame {
+		g.ammo_anim.GoToFrame(ammo_frame)
+	}
+	op.GeoM.Reset()
+	op.GeoM.Translate(float64(g.screen_w)-ammo_counter_w-3, 3)
+	screen.DrawImage(g.ammo_anim.Frame(), op)
 }
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (screenWidth, screenHeight int) {
@@ -965,6 +977,10 @@ func main() {
 	med_slime_damage_img = loadImg("med_slime_damage.png")
 	lg_slime_img = loadImg("lg_slime.png")
 	lg_slime_damage_img = loadImg("lg_slime_damage.png")
+
+	ammo_counter_img = loadImg("SlimeAmmo.png")
+	g_ammo := ganim8.NewGrid(32, 32, 32*3, 32*4)
+	g.ammo_anim = ganim8.New(ammo_counter_img, g_ammo.Frames("1-3", "1-4"), giant_anim_rate)
 
 	// initialize input system
 	g.input_system.Init(input.SystemConfig{DevicesEnabled: input.AnyDevice})
