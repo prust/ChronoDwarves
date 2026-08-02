@@ -36,11 +36,12 @@ const (
 	action_up
 	action_down
 	action_throw_slime
+	action_hit_slime
 	// misc non-history actions
 	action_cam_reset
 	action_hitbox
 	action_time_travel
-	num_hist_actions       = 5
+	num_hist_actions       = 6
 	sample_rate            = 48000
 	anim_rate              = time.Second / 8  // 8fps pixel art animation (looping 3-frame walk cycles)
 	giant_anim_rate        = time.Second / 24 // probably too many frames in this animation, play it faster
@@ -52,8 +53,10 @@ const (
 	giant_h                = 64
 	giant_damage           = 2
 	shockwave_frame        = 9 // the frame at which the giant strikes the ground
-	slime_w                = 4
-	slime_h                = 4
+	slime_sm_w             = 4
+	slime_sm_h             = 4
+	slime_med_w            = 10
+	slime_med_h            = 10
 	grid_size              = 16
 	window_w               = 1024
 	window_h               = 768
@@ -65,6 +68,7 @@ const (
 	max_shockwave_delay_ms = 3000
 	player_start_health    = 8
 	giant_start_health     = 10
+	slime_start_health     = 2
 	num_slimes_on_map      = 25
 )
 
@@ -78,31 +82,37 @@ const (
 )
 
 var (
-	hist_actions    = [num_hist_actions]input.Action{action_left, action_right, action_up, action_down, action_throw_slime}
-	cam             *kamera.Camera
-	game_map        *dngn.Layout
-	character_img   *ebiten.Image
-	wall_img        *ebiten.Image
-	door_img        *ebiten.Image
-	floor_img       *ebiten.Image
-	slime_img       *ebiten.Image
-	is_cam_reset    bool
-	show_hitboxes   bool
-	tick            int // tick starts at 0, increments 60x/sec, and resets to 0 when you go back in time
-	shockwave_snd   *audio.Player
-	slime_giant_snd *audio.Player
-	slime_wall_snd  *audio.Player
-	ambient_snd     *audio.Player
-	red             = color.RGBA{R: 255, G: 0, B: 0, A: 100}
-	see_thru_grey   = color.RGBA{R: 153, G: 153, B: 153, A: 170}
-	see_thru_red    = color.RGBA{R: 255, G: 0, B: 0, A: 50}
-	see_thru_black  = color.RGBA{R: 0, G: 0, B: 0, A: 150}
-	tag_wall        = resolv.NewTag("wall")
-	tag_giant       = resolv.NewTag("giant")
-	tag_collectible = resolv.NewTag("collectible")
-	shockwave_dist  = float64(grid_size * 10)
-	throw_dist      = float64(grid_size * 5)
-	max_los_dist    = float64(grid_size * 8)
+	hist_actions         = [num_hist_actions]input.Action{action_left, action_right, action_up, action_down, action_throw_slime, action_hit_slime}
+	cam                  *kamera.Camera
+	game_map             *dngn.Layout
+	character_img        *ebiten.Image
+	wall_img             *ebiten.Image
+	door_img             *ebiten.Image
+	floor_img            *ebiten.Image
+	sm_slime_img         *ebiten.Image
+	lg_slime_img         *ebiten.Image
+	lg_slime_damage_img  *ebiten.Image
+	med_slime_img        *ebiten.Image
+	med_slime_damage_img *ebiten.Image
+	is_cam_reset         bool
+	show_hitboxes        bool
+	tick                 int // tick starts at 0, increments 60x/sec, and resets to 0 when you go back in time
+	shockwave_snd        *audio.Player
+	slime_giant_snd      *audio.Player
+	slime_wall_snd       *audio.Player
+	ambient_snd          *audio.Player
+	red                  = color.RGBA{R: 255, G: 0, B: 0, A: 100}
+	see_thru_grey        = color.RGBA{R: 153, G: 153, B: 153, A: 170}
+	see_thru_red         = color.RGBA{R: 255, G: 0, B: 0, A: 50}
+	see_thru_black       = color.RGBA{R: 0, G: 0, B: 0, A: 150}
+	tag_wall             = resolv.NewTag("wall")
+	tag_giant            = resolv.NewTag("giant")
+	tag_collectible      = resolv.NewTag("collectible")
+	tag_live_slime       = resolv.NewTag("live_slime")
+	shockwave_dist       = float64(grid_size * 10)
+	throw_dist           = float64(grid_size * 5)
+	max_los_dist         = float64(grid_size * 8)
+	max_hit_dist         = float64(30)
 )
 
 type Game struct {
@@ -153,7 +163,7 @@ func (g *Game) LoadSoundPlayer(filename string) *audio.Player {
 func (g *Game) ResetSlimesOnMap() {
 	for range num_slimes_on_map {
 		x, y := findEmptyCells(1, 1, g.rng)
-		g.SpawnNewSlime(float64(x*grid_size), float64(y*grid_size))
+		g.SpawnNewSlime(float64(x*grid_size), float64(y*grid_size), true)
 	}
 }
 
@@ -220,15 +230,38 @@ type Player struct {
 	throw_cooldown bool
 	num_slimes     int
 	red_fov        bool
+	hit_circle     bool
 }
 
-func (g *Game) SpawnNewSlime(x, y float64) {
-	slime := &Slime{x: x, y: y}
-	slime.rect = resolv.NewRectangleFromTopLeft(slime.x, slime.y, slime_w, slime_h)
-	slime.rect.Tags().Set(tag_collectible)
+func (g *Game) SpawnNewSlime(x, y float64, is_alive bool) *Slime {
+	slime := &Slime{x: x, y: y, start_x: x, start_y: y}
+	if is_alive {
+		slime.rect = resolv.NewRectangleFromTopLeft(slime.x, slime.y, slime_med_w, slime_med_h)
+	} else {
+		slime.rect = resolv.NewRectangleFromTopLeft(slime.x, slime.y, slime_sm_w, slime_sm_h)
+	}
 	g.space.Add(slime.rect)
 	g.slimes = append(g.slimes, slime)
-
+	if is_alive {
+		slime.health = slime_start_health
+		slime.rect.Tags().Set(tag_live_slime)
+		ms := g.rng.IntN(200)
+		g.timer_system.AfterDuration((100+time.Duration(ms))*time.Millisecond, func(_ *et.Timer, _ int) et.FinishMode {
+			// always generate these random numbers, regardless of outside happenings, to keep RNG in sync
+			rnd_x, rnd_y := g.rng.IntN(3), g.rng.IntN(3)
+			if slime.health > 0 {
+				if slime.dx > 0 || slime.dy > 0 {
+					slime.dx = 0
+					slime.dy = 0
+				} else {
+					slime.dx = float64(rnd_x - 1)
+					slime.dy = float64(rnd_y - 1)
+				}
+			}
+			return et.FinishLoop
+		})
+	}
+	return slime
 }
 
 func (self *Player) TakeDamage(damage int, g *Game) {
@@ -241,8 +274,7 @@ func (self *Player) TakeDamage(damage int, g *Game) {
 		for range self.num_slimes + 1 {
 			x := self.rect.Center().X + rand.Float64()*20 - 10
 			y := self.rect.Center().Y + rand.Float64()*20 - 10
-			g.SpawnNewSlime(x, y)
-
+			g.SpawnNewSlime(x, y, false)
 		}
 	} else {
 		sound = self.hurt_snd
@@ -297,13 +329,16 @@ type Giant struct {
 }
 
 type Slime struct {
-	x       float64
-	y       float64
-	dx      float64
-	dy      float64
-	rect    *resolv.ConvexPolygon
-	start_x float64
-	start_y float64
+	x              float64
+	y              float64
+	dx             float64
+	dy             float64
+	rect           *resolv.ConvexPolygon
+	start_x        float64
+	start_y        float64
+	health         int
+	is_collectible bool
+	dealt_dmg      bool
 }
 
 type Line struct {
@@ -422,8 +457,8 @@ func (g *Game) Update() error {
 						input_changed = true
 					}
 				}
-				if hist_point.just_released[action_throw_slime] {
-					info, _ := g.player_input.JustReleasedActionInfo(action_throw_slime)
+				if hist_point.just_pressed[action_throw_slime] {
+					info, _ := g.player_input.JustPressedActionInfo(action_throw_slime)
 					hist_point.mouse_x, hist_point.mouse_y = cam.ScreenToWorld(int(info.Pos.X), int(info.Pos.Y))
 				}
 				if input_changed {
@@ -467,12 +502,29 @@ func (g *Game) Update() error {
 		// filter to shapes near the player
 		near_shapes := self.rect.SelectTouchingCells(4).FilterShapes()
 		self.rect.IntersectionTest(resolv.IntersectionTestSettings{
-			TestAgainst: near_shapes.ByTags(tag_wall),
+			TestAgainst: near_shapes.ByTags(tag_wall | tag_live_slime),
 			OnIntersect: func(set resolv.IntersectionSet) bool {
-				// back off from what we collided/intersected with
-				self.rect.MoveVec(set.MTV)
-				self.x += set.MTV.X
-				self.y += set.MTV.Y
+				if set.OtherShape.Tags().Has(tag_wall) {
+					// back off from the wall we collided/intersected with
+					self.rect.MoveVec(set.MTV)
+					self.x += set.MTV.X
+					self.y += set.MTV.Y
+				} else { // live slime
+					slime_ix := slices.IndexFunc(g.slimes, func(slime *Slime) bool {
+						return slime.rect == set.OtherShape
+					})
+					if slime_ix > -1 {
+						slime := g.slimes[slime_ix]
+						if !slime.dealt_dmg && self.health > 0 {
+							self.TakeDamage(1, g)
+							slime.dealt_dmg = true
+							g.timer_system.AfterDuration(500*time.Millisecond, func(_ *et.Timer, _ int) et.FinishMode {
+								slime.dealt_dmg = false
+								return et.FinishEnd
+							})
+						}
+					}
+				}
 				// keep iterating (in case we're touching something else)
 				return true
 			},
@@ -524,21 +576,45 @@ func (g *Game) Update() error {
 			self.walk_anim[self.dir].GoToFrame(2)
 		}
 
-		if hist_point.just_released[action_throw_slime] && !self.throw_cooldown && self.num_slimes > 0 {
-			self.num_slimes--
-			slime := &Slime{x: self.x + player_w/2, y: self.y + player_h/2}
-			slime.start_x, slime.start_y = slime.x, slime.y
-			slime.rect = resolv.NewRectangleFromTopLeft(slime.x, slime.y, slime_w, slime_h)
-			g.space.Add(slime.rect)
-			throw_vec_x := hist_point.mouse_x - slime.x
-			throw_vec_y := hist_point.mouse_y - slime.y
-			slime.dx, slime.dy = normalizeVector(throw_vec_x, throw_vec_y, throw_speed)
-			g.slimes = append(g.slimes, slime)
-			self.throw_cooldown = true
-			g.timer_system.AfterDuration(500*time.Millisecond, func(_ *et.Timer, _ int) et.FinishMode {
-				self.throw_cooldown = false
+		if hist_point.just_pressed[action_hit_slime] {
+			self.hit_circle = true
+			g.timer_system.AfterDuration(200*time.Millisecond, func(_ *et.Timer, _ int) et.FinishMode {
+				self.hit_circle = false
 				return et.FinishEnd
 			})
+			for _, slime := range g.slimes {
+				if slime.health > 0 {
+					if slime.rect.DistanceTo(self.rect) <= max_hit_dist {
+						slime.health--
+						if slime.health <= 0 {
+							slime.is_collectible = true
+							slime.rect.Tags().Set(tag_collectible)
+							slime.rect.Tags().Unset(tag_live_slime)
+
+							// shift the slime's top-left position slightly
+							// to keep it centered, since it's shrinking
+							slime.x += 2
+							slime.y += 2
+						}
+						// TODO: play slime-hitting sound
+					}
+				}
+			}
+		}
+
+		if hist_point.just_pressed[action_throw_slime] {
+			if !self.throw_cooldown && self.num_slimes > 0 {
+				self.num_slimes--
+				slime := g.SpawnNewSlime(self.x+player_w/2, self.y+player_h/2, false)
+				throw_vec_x := hist_point.mouse_x - slime.x
+				throw_vec_y := hist_point.mouse_y - slime.y
+				slime.dx, slime.dy = normalizeVector(throw_vec_x, throw_vec_y, throw_speed)
+				self.throw_cooldown = true
+				g.timer_system.AfterDuration(500*time.Millisecond, func(_ *et.Timer, _ int) et.FinishMode {
+					self.throw_cooldown = false
+					return et.FinishEnd
+				})
+			}
 		}
 
 		if is_walking {
@@ -562,25 +638,38 @@ func (g *Game) Update() error {
 			slime.y += slime.dy
 			slime.rect.Move(slime.dx, slime.dy)
 			near_shapes := slime.rect.SelectTouchingCells(4).FilterShapes()
-			hit_something := slime.rect.IntersectionTest(resolv.IntersectionTestSettings{
+			hit_wall := false
+			hit_giant := false
+			slime.rect.IntersectionTest(resolv.IntersectionTestSettings{
 				TestAgainst: near_shapes.ByTags(tag_wall | tag_giant),
 				OnIntersect: func(set resolv.IntersectionSet) bool {
 					if set.OtherShape.Tags().Has(tag_giant) {
+						hit_giant = true
 						slime_giant_snd.Rewind()
 						slime_giant_snd.Play()
 						g.giant.health--
 						if g.giant.health == 0 {
 							g.space.Remove(g.giant.rect)
 						}
-					} else {
-						slime_wall_snd.Rewind()
-						slime_wall_snd.Play()
+					} else if set.OtherShape.Tags().Has(tag_wall) {
+						hit_wall = true
+						// dead slime being thrown at wall (vs live slime bumping wall)
+						if slime.health == 0 {
+							slime_wall_snd.Rewind()
+							slime_wall_snd.Play()
+						} else {
+							// back off from the wall
+							slime.rect.MoveVec(set.MTV)
+							slime.x += set.MTV.X
+							slime.y += set.MTV.Y
+						}
 					}
-					return false
+					return true
 				},
 			})
 			dist := distance(slime.start_x, slime.start_y, slime.x, slime.y)
-			if hit_something || dist > throw_dist {
+			// applies to dead thrown-slimes
+			if slime.health == 0 && (hit_wall || hit_giant || dist > throw_dist) {
 				g.slimes = slices.Delete(g.slimes, i, i+1)
 				g.space.Remove(slime.rect)
 			}
@@ -670,6 +759,9 @@ func (g *Game) Draw(screen *ebiten.Image) {
 			drawHitbox(wall_rect, cam, screen)
 		}
 		drawHitbox(g.giant.rect, cam, screen)
+		for _, slime := range g.slimes {
+			drawHitbox(slime.rect, cam, screen)
+		}
 	}
 
 	if g.giant.health > 0 {
@@ -684,6 +776,12 @@ func (g *Game) Draw(screen *ebiten.Image) {
 				vector.FillCircle(screen, float32(x), float32(y), float32(shockwave_dist), see_thru_grey, false)
 			}
 		}
+	}
+
+	curr_player := g.selves[len(g.selves)-1]
+	if curr_player.hit_circle {
+		x, y := cam.ApplyCameraTransformToPoint(curr_player.rect.Position().X, curr_player.rect.Position().Y)
+		vector.FillCircle(screen, float32(x), float32(y), float32(max_hit_dist), see_thru_grey, false)
 	}
 
 	for ix, player := range g.selves {
@@ -730,7 +828,21 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	for _, slime := range g.slimes {
 		op.GeoM.Reset()
 		op.GeoM.Translate(slime.x, slime.y)
-		cam.Draw(slime_img, op, screen)
+		if slime.health > 1 {
+			if slime.dealt_dmg {
+				cam.Draw(lg_slime_damage_img, op, screen)
+			} else {
+				cam.Draw(lg_slime_img, op, screen)
+			}
+		} else if slime.health > 0 {
+			if slime.dealt_dmg {
+				cam.Draw(med_slime_damage_img, op, screen)
+			} else {
+				cam.Draw(med_slime_img, op, screen)
+			}
+		} else {
+			cam.Draw(sm_slime_img, op, screen)
+		}
 	}
 
 	rm_x1, rm_y1 := cam.ApplyCameraTransformToPoint(float64(g.giants_room.X*grid_size), float64(g.giants_room.Y*grid_size))
@@ -822,7 +934,11 @@ func main() {
 	wall_img = loadImg("wall.png")
 	door_img = loadImg("door.png")
 	floor_img = loadImg("floor.png")
-	slime_img = loadImg("sm_slime.png")
+	sm_slime_img = loadImg("sm_slime.png")
+	med_slime_img = loadImg("med_slime.png")
+	med_slime_damage_img = loadImg("med_slime_damage.png")
+	lg_slime_img = loadImg("lg_slime.png")
+	lg_slime_damage_img = loadImg("lg_slime_damage.png")
 
 	// initialize input system
 	g.input_system.Init(input.SystemConfig{DevicesEnabled: input.AnyDevice})
@@ -835,6 +951,7 @@ func main() {
 		action_hitbox:      {input.KeyH},
 		action_time_travel: {input.KeyT},
 		action_throw_slime: {input.KeyMouseLeft},
+		action_hit_slime:   {input.KeyMouseRight},
 	}
 
 	var err error
