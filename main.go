@@ -91,6 +91,7 @@ var (
 	game_map             *dngn.Layout
 	character_img        *ebiten.Image
 	wall_img             *ebiten.Image
+	wall_torch_img       *ebiten.Image
 	door_img             *ebiten.Image
 	floor_img            *ebiten.Image
 	sm_slime_img         *ebiten.Image
@@ -812,11 +813,12 @@ func (g *Game) Draw(screen *ebiten.Image) {
 				// op.Filter = ebiten.FilterLinear
 
 				v := game_map.Get(x, y)
-				if v == ' ' {
+				if v == ' ' || v == '#' {
 					cam.Draw(floor_img, op, screen)
-				} else if v == '#' {
-					cam.Draw(door_img, op, screen)
 				}
+				// else if v == '#' {
+				// 	cam.Draw(door_img, op, screen)
+				// }
 			}
 		}
 	}
@@ -832,7 +834,12 @@ func (g *Game) Draw(screen *ebiten.Image) {
 					op.GeoM.Translate(float64(x*grid_size), float64(y*grid_size))
 					// smooth anti-aliasing (and so ebitengine batches calls due to identical Filter param)
 					// op.Filter = ebiten.FilterLinear
-					cam.Draw(wall_img, op, screen)
+					// every 10th is a torch, so long as there's no wall below it
+					if x%10 == 0 && game_map.Get(x, y+1) != 'x' {
+						cam.Draw(wall_torch_img, op, screen)
+					} else {
+						cam.Draw(wall_img, op, screen)
+					}
 				}
 			}
 		}
@@ -1050,6 +1057,7 @@ func main() {
 	// load images/spritesheets
 	character_img = loadImg("dwarf_character.png")
 	wall_img = loadImg("WallTall.png")
+	wall_torch_img = loadImg("WallTorch.png")
 	door_img = loadImg("door.png")
 	floor_img = loadImg("floor.png")
 	sm_slime_img = loadImg("sm_slime.png")
