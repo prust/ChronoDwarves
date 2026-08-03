@@ -1184,10 +1184,10 @@ func initPlayer(g *Game) *Player {
 	player.death_snd = g.LoadSoundPlayer("death.wav")
 
 	g_pl := ganim8.NewGrid(player_w, player_h, player_w*3, player_h*5)
-	player.walk_anim[0] = ganim8.New(character_img, g_pl.Frames("1-3", 1), anim_rate)
-	player.walk_anim[1] = ganim8.New(character_img, g_pl.Frames("1-3", 2), anim_rate)
-	player.walk_anim[2] = ganim8.New(character_img, g_pl.Frames("1-3", 3), anim_rate)
-	player.walk_anim[3] = ganim8.New(character_img, g_pl.Frames("1-3", 4), anim_rate)
+	player.walk_anim[0] = ganim8.New(character_img, slices.Concat(g_pl.Frames("1-3", 1), g_pl.Frames(2, 1)), anim_rate)
+	player.walk_anim[1] = ganim8.New(character_img, slices.Concat(g_pl.Frames("1-3", 2), g_pl.Frames(2, 2)), anim_rate)
+	player.walk_anim[2] = ganim8.New(character_img, slices.Concat(g_pl.Frames("1-3", 3), g_pl.Frames(2, 3)), anim_rate)
+	player.walk_anim[3] = ganim8.New(character_img, slices.Concat(g_pl.Frames("1-3", 4), g_pl.Frames(2, 4)), anim_rate)
 
 	return player
 }
