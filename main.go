@@ -59,6 +59,8 @@ const (
 	slime_sm_h             = 4
 	slime_med_w            = 10
 	slime_med_h            = 10
+	axe_anim_w             = 64
+	axe_anim_h             = 64
 	grid_size              = 16
 	window_w               = 1024
 	window_h               = 768
@@ -97,6 +99,8 @@ var (
 	med_slime_img        *ebiten.Image
 	med_slime_damage_img *ebiten.Image
 	ammo_counter_img     *ebiten.Image
+	axe_attack_img       *ebiten.Image
+	life_hearts_img      *ebiten.Image
 	ammo_counter_w       float64 = 32
 	is_cam_reset         bool
 	show_hitboxes        bool
@@ -129,6 +133,8 @@ type Game struct {
 	giant             *Giant
 	giant_anim        *ganim8.Animation // one animation for the giant's shockwave punch
 	ammo_anim         *ganim8.Animation
+	axe_anim          *ganim8.Animation
+	hearts_anim       *ganim8.Animation
 	screen_w          int
 	screen_h          int
 	input_system      input.System
@@ -615,6 +621,7 @@ func (g *Game) Update() error {
 
 		if hist_point.just_pressed[action_hit_slime] {
 			self.hit_circle = true
+			g.axe_anim.GoToFrame(1)
 			g.timer_system.AfterDuration(200*time.Millisecond, func(_ *et.Timer, _ int) et.FinishMode {
 				self.hit_circle = false
 				return et.FinishEnd
@@ -780,6 +787,8 @@ func (g *Game) Update() error {
 		}
 	}
 
+	g.axe_anim.Update()
+
 	tick++
 	return nil
 }
@@ -859,8 +868,11 @@ func (g *Game) Draw(screen *ebiten.Image) {
 
 	curr_player := g.selves[len(g.selves)-1]
 	if curr_player.hit_circle {
-		x, y := cam.ApplyCameraTransformToPoint(curr_player.rect.Position().X, curr_player.rect.Position().Y)
-		vector.FillCircle(screen, float32(x), float32(y), float32(max_hit_dist), see_thru_grey, false)
+		op.GeoM.Reset()
+		op.GeoM.Translate(curr_player.rect.Center().X-axe_anim_w/2, curr_player.rect.Center().Y-axe_anim_h/2)
+		cam.Draw(g.axe_anim.Frame(), op, screen)
+		// x, y := cam.ApplyCameraTransformToPoint(curr_player.rect.Position().X, curr_player.rect.Position().Y)
+		// vector.FillCircle(screen, float32(x), float32(y), float32(max_hit_dist), see_thru_grey, false)
 	}
 
 	for ix, player := range g.selves {
@@ -937,6 +949,24 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	op.GeoM.Reset()
 	op.GeoM.Translate(float64(g.screen_w)-ammo_counter_w-3, 3)
 	screen.DrawImage(g.ammo_anim.Frame(), op)
+
+	for curr_heart_ix := range 4 {
+		num_hearts := float64(curr_player.health) / 2
+		var heart_frame int
+		if num_hearts >= float64(curr_heart_ix+1) {
+			heart_frame = 1
+		} else if num_hearts <= float64(curr_heart_ix) {
+			heart_frame = 3
+		} else {
+			heart_frame = 2
+		}
+		if g.hearts_anim.Position() != heart_frame {
+			g.hearts_anim.GoToFrame(heart_frame)
+		}
+		op.GeoM.Reset()
+		op.GeoM.Translate((1+16)*float64(curr_heart_ix)+3, 3)
+		screen.DrawImage(g.hearts_anim.Frame(), op)
+	}
 }
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (screenWidth, screenHeight int) {
@@ -1030,7 +1060,15 @@ func main() {
 
 	ammo_counter_img = loadImg("SlimeAmmo.png")
 	g_ammo := ganim8.NewGrid(32, 32, 32*3, 32*4)
-	g.ammo_anim = ganim8.New(ammo_counter_img, g_ammo.Frames("1-3", "1-4"), giant_anim_rate)
+	g.ammo_anim = ganim8.New(ammo_counter_img, g_ammo.Frames("1-3", "1-4"), anim_rate)
+
+	axe_attack_img = loadImg("axe_attack.png")
+	g_axe := ganim8.NewGrid(axe_anim_w, axe_anim_h, axe_anim_w*2, axe_anim_h*2)
+	g.axe_anim = ganim8.New(axe_attack_img, g_axe.Frames("1-2", "1-2"), giant_anim_rate)
+
+	life_hearts_img = loadImg("life_hearts.png")
+	g_hearts := ganim8.NewGrid(16, 16, 16*3, 16*1)
+	g.hearts_anim = ganim8.New(life_hearts_img, g_hearts.Frames("1-3", "1"), anim_rate)
 
 	// initialize input system
 	g.input_system.Init(input.SystemConfig{DevicesEnabled: input.AnyDevice})
