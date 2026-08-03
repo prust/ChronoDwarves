@@ -41,16 +41,18 @@ const (
 	action_cam_reset
 	action_hitbox
 	action_time_travel
-	num_hist_actions       = 6
-	sample_rate            = 48000
-	anim_rate              = time.Second / 8  // 8fps pixel art animation (looping 3-frame walk cycles)
-	giant_anim_rate        = time.Second / 24 // probably too many frames in this animation, play it faster
-	player_speed           = 3
-	throw_speed            = 5
-	player_w               = 16
-	player_h               = 32
-	giant_w                = 48
-	giant_h                = 64
+	num_hist_actions = 6
+	sample_rate      = 48000
+	anim_rate        = time.Second / 8  // 8fps pixel art animation (looping 3-frame walk cycles)
+	giant_anim_rate  = time.Second / 24 // probably too many frames in this animation, play it faster
+	player_speed     = 3
+	throw_speed      = 5
+	player_w         = 16
+	player_h         = 32
+	giant_w          = 48
+	giant_h          = 64
+	// giant_health_h         = 6
+	// giant_health_w         = 36
 	giant_damage           = 2
 	shockwave_frame        = 9 // the frame at which the giant strikes the ground
 	slime_sm_w             = 4
@@ -279,6 +281,7 @@ func (g *Game) SpawnNewSlime(x, y float64, is_alive bool) *Slime {
 }
 
 func (self *Player) TakeDamage(damage int, g *Game) {
+	is_curr_self := self == g.selves[len(g.selves)-1]
 	self.health -= damage
 	var sound *audio.Player
 	if self.health <= 0 {
@@ -290,11 +293,17 @@ func (self *Player) TakeDamage(damage int, g *Game) {
 			y := self.rect.Center().Y + rand.Float64()*20 - 10
 			g.SpawnNewSlime(x, y, false)
 		}
+
+		if is_curr_self {
+			self.history = append(self.history, InputHistoryPoint{tick: tick, curr_health: 0, num_slimes: self.num_slimes})
+		}
 	} else {
 		sound = self.hurt_snd
 	}
-	sound.Rewind()
-	sound.Play()
+	if is_curr_self {
+		sound.Rewind()
+		sound.Play()
+	}
 }
 
 // get the 2 points at the edge of the player's field of view (FOV)
@@ -331,6 +340,7 @@ type InputHistoryPoint struct {
 	mouse_x       float64
 	mouse_y       float64
 	curr_health   int
+	num_slimes    int
 }
 
 type Giant struct {
@@ -419,8 +429,15 @@ func (g *Game) Update() error {
 				next_up_hist_point := self.history[self.hist_ix]
 				if next_up_hist_point.tick == tick {
 					hist_point = next_up_hist_point
-					self.hist_ix++                       // advance to next history point
-					self.health = hist_point.curr_health // fudgy cheat: force-update the health in case something got off
+					self.hist_ix++ // advance to next history point
+					// fudgy cheat: force-update the num_slimes
+					self.num_slimes = hist_point.num_slimes
+					// make sure we trigger the death logic
+					if hist_point.curr_health == 0 && self.health > 0 {
+						self.TakeDamage(self.health-hist_point.curr_health, g)
+					} else {
+						self.health = hist_point.curr_health // fudgy cheat: force-update the health in case something got off
+					}
 				}
 			}
 
@@ -460,7 +477,7 @@ func (g *Game) Update() error {
 			// "current" self
 			// store just pressed/released action in an input history point
 			// *if* the player is still alive
-			hist_point = InputHistoryPoint{tick: tick, curr_health: self.health}
+			hist_point = InputHistoryPoint{tick: tick, curr_health: self.health, num_slimes: self.num_slimes}
 			if self.health > 0 {
 				input_changed := false
 				for _, action := range hist_actions {
@@ -1212,6 +1229,10 @@ func drawHitbox(box *resolv.ConvexPolygon, cam *kamera.Camera, screen *ebiten.Im
 	vec := box.Points[0]
 	drawLine(x+prev_vec.X, y+prev_vec.Y, x+vec.X, y+vec.Y, red, cam, screen)
 }
+
+// func drawRectangle(x float64, y float64, x2 float64, y2 float64, col color.RGBA, cam *kamera.Camera, screen *ebiten.Image) {
+
+// }
 
 func drawLine(x float64, y float64, x2 float64, y2 float64, col color.RGBA, cam *kamera.Camera, screen *ebiten.Image) {
 	x, y = cam.ApplyCameraTransformToPoint(x, y)
