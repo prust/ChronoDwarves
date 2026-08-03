@@ -272,6 +272,8 @@ func (g *Game) SpawnNewSlime(x, y float64, is_alive bool) *Slime {
 			}
 			return et.FinishLoop
 		})
+	} else {
+		slime.rect.Tags().Set(tag_collectible)
 	}
 	return slime
 }
