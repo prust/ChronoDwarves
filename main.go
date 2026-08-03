@@ -171,7 +171,7 @@ func (g *Game) LoadSoundPlayer(filename string) *audio.Player {
 func (g *Game) ResetSlimesOnMap() {
 	for range num_slimes_on_map {
 		x, y := findEmptyCells(1, 1, g.rng)
-		g.SpawnNewSlime(float64(x*grid_size), float64(y*grid_size), true)
+		g.SpawnNewSlime(float64(x*grid_size), float64(y*grid_size), true, false)
 	}
 }
 
@@ -241,7 +241,7 @@ type Player struct {
 	hit_circle     bool
 }
 
-func (g *Game) SpawnNewSlime(x, y float64, is_alive bool) *Slime {
+func (g *Game) SpawnNewSlime(x, y float64, is_alive bool, is_collectible bool) *Slime {
 	slime := &Slime{x: x, y: y, start_x: x, start_y: y}
 	if is_alive {
 		slime.rect = resolv.NewRectangleFromTopLeft(slime.x, slime.y, slime_med_w, slime_med_h)
@@ -274,7 +274,8 @@ func (g *Game) SpawnNewSlime(x, y float64, is_alive bool) *Slime {
 			}
 			return et.FinishLoop
 		})
-	} else {
+	}
+	if is_collectible {
 		slime.rect.Tags().Set(tag_collectible)
 	}
 	return slime
@@ -291,7 +292,7 @@ func (self *Player) TakeDamage(damage int, g *Game) {
 		for range self.num_slimes + 1 {
 			x := self.rect.Center().X + rand.Float64()*20 - 10
 			y := self.rect.Center().Y + rand.Float64()*20 - 10
-			g.SpawnNewSlime(x, y, false)
+			g.SpawnNewSlime(x, y, false, true)
 		}
 
 		if is_curr_self {
@@ -651,7 +652,7 @@ func (g *Game) Update() error {
 		if hist_point.just_pressed[action_throw_slime] {
 			if !self.throw_cooldown && self.num_slimes > 0 {
 				self.num_slimes--
-				slime := g.SpawnNewSlime(self.x+player_w/2, self.y+player_h/2, false)
+				slime := g.SpawnNewSlime(self.x+player_w/2, self.y+player_h/2, false, false)
 				throw_vec_x := hist_point.mouse_x - slime.x
 				throw_vec_y := hist_point.mouse_y - slime.y
 				slime.dx, slime.dy = normalizeVector(throw_vec_x, throw_vec_y, throw_speed)
