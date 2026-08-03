@@ -279,6 +279,7 @@ func (g *Game) SpawnNewSlime(x, y float64, is_alive bool) *Slime {
 }
 
 func (self *Player) TakeDamage(damage int, g *Game) {
+	is_curr_self := self == g.selves[len(g.selves)-1]
 	self.health -= damage
 	var sound *audio.Player
 	if self.health <= 0 {
@@ -290,11 +291,17 @@ func (self *Player) TakeDamage(damage int, g *Game) {
 			y := self.rect.Center().Y + rand.Float64()*20 - 10
 			g.SpawnNewSlime(x, y, false)
 		}
+
+		if is_curr_self {
+			self.history = append(self.history, InputHistoryPoint{tick: tick, curr_health: 0, num_slimes: self.num_slimes})
+		}
 	} else {
 		sound = self.hurt_snd
 	}
-	sound.Rewind()
-	sound.Play()
+	if is_curr_self {
+		sound.Rewind()
+		sound.Play()
+	}
 }
 
 // get the 2 points at the edge of the player's field of view (FOV)
@@ -331,6 +338,7 @@ type InputHistoryPoint struct {
 	mouse_x       float64
 	mouse_y       float64
 	curr_health   int
+	num_slimes    int
 }
 
 type Giant struct {
@@ -419,8 +427,15 @@ func (g *Game) Update() error {
 				next_up_hist_point := self.history[self.hist_ix]
 				if next_up_hist_point.tick == tick {
 					hist_point = next_up_hist_point
-					self.hist_ix++                       // advance to next history point
-					self.health = hist_point.curr_health // fudgy cheat: force-update the health in case something got off
+					self.hist_ix++ // advance to next history point
+					// fudgy cheat: force-update the num_slimes
+					self.num_slimes = hist_point.num_slimes
+					// make sure we trigger the death logic
+					if hist_point.curr_health == 0 && self.health > 0 {
+						self.TakeDamage(self.health-hist_point.curr_health, g)
+					} else {
+						self.health = hist_point.curr_health // fudgy cheat: force-update the health in case something got off
+					}
 				}
 			}
 
@@ -460,7 +475,7 @@ func (g *Game) Update() error {
 			// "current" self
 			// store just pressed/released action in an input history point
 			// *if* the player is still alive
-			hist_point = InputHistoryPoint{tick: tick, curr_health: self.health}
+			hist_point = InputHistoryPoint{tick: tick, curr_health: self.health, num_slimes: self.num_slimes}
 			if self.health > 0 {
 				input_changed := false
 				for _, action := range hist_actions {
