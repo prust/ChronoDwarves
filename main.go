@@ -41,16 +41,18 @@ const (
 	action_cam_reset
 	action_hitbox
 	action_time_travel
-	num_hist_actions       = 6
-	sample_rate            = 48000
-	anim_rate              = time.Second / 8  // 8fps pixel art animation (looping 3-frame walk cycles)
-	giant_anim_rate        = time.Second / 24 // probably too many frames in this animation, play it faster
-	player_speed           = 3
-	throw_speed            = 5
-	player_w               = 16
-	player_h               = 32
-	giant_w                = 48
-	giant_h                = 64
+	num_hist_actions = 6
+	sample_rate      = 48000
+	anim_rate        = time.Second / 8  // 8fps pixel art animation (looping 3-frame walk cycles)
+	giant_anim_rate  = time.Second / 24 // probably too many frames in this animation, play it faster
+	player_speed     = 3
+	throw_speed      = 5
+	player_w         = 16
+	player_h         = 32
+	giant_w          = 48
+	giant_h          = 64
+	// giant_health_h         = 6
+	// giant_health_w         = 36
 	giant_damage           = 2
 	shockwave_frame        = 9 // the frame at which the giant strikes the ground
 	slime_sm_w             = 4
@@ -1210,6 +1212,10 @@ func drawHitbox(box *resolv.ConvexPolygon, cam *kamera.Camera, screen *ebiten.Im
 	vec := box.Points[0]
 	drawLine(x+prev_vec.X, y+prev_vec.Y, x+vec.X, y+vec.Y, red, cam, screen)
 }
+
+// func drawRectangle(x float64, y float64, x2 float64, y2 float64, col color.RGBA, cam *kamera.Camera, screen *ebiten.Image) {
+
+// }
 
 func drawLine(x float64, y float64, x2 float64, y2 float64, col color.RGBA, cam *kamera.Camera, screen *ebiten.Image) {
 	x, y = cam.ApplyCameraTransformToPoint(x, y)
