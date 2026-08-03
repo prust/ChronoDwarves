@@ -97,6 +97,8 @@ var (
 	med_slime_img        *ebiten.Image
 	med_slime_damage_img *ebiten.Image
 	ammo_counter_img     *ebiten.Image
+	axe_attack_img       *ebiten.Image
+	life_hearts_img      *ebiten.Image
 	ammo_counter_w       float64 = 32
 	is_cam_reset         bool
 	show_hitboxes        bool
@@ -129,6 +131,8 @@ type Game struct {
 	giant             *Giant
 	giant_anim        *ganim8.Animation // one animation for the giant's shockwave punch
 	ammo_anim         *ganim8.Animation
+	axe_anim          *ganim8.Animation
+	hearts_anim       *ganim8.Animation
 	screen_w          int
 	screen_h          int
 	input_system      input.System
@@ -937,6 +941,24 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	op.GeoM.Reset()
 	op.GeoM.Translate(float64(g.screen_w)-ammo_counter_w-3, 3)
 	screen.DrawImage(g.ammo_anim.Frame(), op)
+
+	for curr_heart_ix := range 4 {
+		num_hearts := float64(curr_player.health) / 2
+		var heart_frame int
+		if num_hearts >= float64(curr_heart_ix+1) {
+			heart_frame = 1
+		} else if num_hearts <= float64(curr_heart_ix) {
+			heart_frame = 3
+		} else {
+			heart_frame = 2
+		}
+		if g.hearts_anim.Position() != heart_frame {
+			g.hearts_anim.GoToFrame(heart_frame)
+		}
+		op.GeoM.Reset()
+		op.GeoM.Translate((1+16)*float64(curr_heart_ix)+3, 3)
+		screen.DrawImage(g.hearts_anim.Frame(), op)
+	}
 }
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (screenWidth, screenHeight int) {
@@ -1030,7 +1052,15 @@ func main() {
 
 	ammo_counter_img = loadImg("SlimeAmmo.png")
 	g_ammo := ganim8.NewGrid(32, 32, 32*3, 32*4)
-	g.ammo_anim = ganim8.New(ammo_counter_img, g_ammo.Frames("1-3", "1-4"), giant_anim_rate)
+	g.ammo_anim = ganim8.New(ammo_counter_img, g_ammo.Frames("1-3", "1-4"), anim_rate)
+
+	axe_attack_img = loadImg("axe_attack.png")
+	g_axe := ganim8.NewGrid(64, 64, 64*2, 64*2)
+	g.axe_anim = ganim8.New(axe_attack_img, g_axe.Frames("1-2", "1-2"), anim_rate)
+
+	life_hearts_img = loadImg("life_hearts.png")
+	g_hearts := ganim8.NewGrid(16, 16, 16*3, 16*1)
+	g.hearts_anim = ganim8.New(life_hearts_img, g_hearts.Frames("1-3", "1"), anim_rate)
 
 	// initialize input system
 	g.input_system.Init(input.SystemConfig{DevicesEnabled: input.AnyDevice})
