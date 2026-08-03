@@ -104,6 +104,8 @@ var (
 	slime_wall_snd       *audio.Player
 	ambient_snd          *audio.Player
 	ambient_boss_snd     *audio.Player
+	collect_snd          *audio.Player
+	swing_miss_snd       *audio.Player
 	red                  = color.RGBA{R: 255, G: 0, B: 0, A: 100}
 	see_thru_grey        = color.RGBA{R: 100, G: 100, B: 100, A: 170}
 	see_thru_red         = color.RGBA{R: 255, G: 0, B: 0, A: 50}
@@ -553,6 +555,8 @@ func (g *Game) Update() error {
 					g.slimes = slices.Delete(g.slimes, ix, ix+1)
 					g.space.Remove(set.OtherShape)
 					self.num_slimes++
+					collect_snd.Rewind()
+					collect_snd.Play()
 				}
 				// keep iterating (in case we're touching multiple collectibles)
 				return true
@@ -594,10 +598,12 @@ func (g *Game) Update() error {
 				self.hit_circle = false
 				return et.FinishEnd
 			})
+			did_hit_slime := false
 			for _, slime := range g.slimes {
 				if slime.health > 0 {
 					if slime.rect.DistanceTo(self.rect) <= max_hit_dist {
 						slime.health--
+						did_hit_slime = true
 						if slime.health <= 0 {
 							slime.is_collectible = true
 							slime.rect.Tags().Set(tag_collectible)
@@ -613,6 +619,13 @@ func (g *Game) Update() error {
 						// TODO: play slime-hitting sound
 					}
 				}
+			}
+			if did_hit_slime {
+				slime_giant_snd.Rewind() // TODO: rename; this is used for hitting slimes, too
+				slime_giant_snd.Play()
+			} else {
+				swing_miss_snd.Rewind()
+				swing_miss_snd.Play()
 			}
 		}
 
@@ -1013,6 +1026,9 @@ func main() {
 	shockwave_snd = g.LoadSoundPlayer("shockwave.wav")
 	slime_giant_snd = g.LoadSoundPlayer("hit_giant.wav")
 	slime_wall_snd = g.LoadSoundPlayer("hit_wall.wav")
+	collect_snd = g.LoadSoundPlayer("hit_wall.wav")
+	swing_miss_snd = g.LoadSoundPlayer("hit_wall.wav")
+
 	ambient_wav := loadWav("ambient.wav")
 	ambient_boss_wav := loadWav("ambient_boss.wav")
 	loop_ambient := audio.NewInfiniteLoop(ambient_wav, ambient_wav.Length())
