@@ -41,18 +41,18 @@ const (
 	action_cam_reset
 	action_hitbox
 	action_time_travel
-	num_hist_actions = 6
-	sample_rate      = 48000
-	anim_rate        = time.Second / 8  // 8fps pixel art animation (looping 3-frame walk cycles)
-	giant_anim_rate  = time.Second / 24 // probably too many frames in this animation, play it faster
-	player_speed     = 3
-	throw_speed      = 5
-	player_w         = 16
-	player_h         = 32
-	giant_w          = 48
-	giant_h          = 64
-	// giant_health_h         = 6
-	// giant_health_w         = 36
+	num_hist_actions       = 6
+	sample_rate            = 48000
+	anim_rate              = time.Second / 8  // 8fps pixel art animation (looping 3-frame walk cycles)
+	giant_anim_rate        = time.Second / 24 // probably too many frames in this animation, play it faster
+	player_speed           = 3
+	throw_speed            = 5
+	player_w               = 16
+	player_h               = 32
+	giant_w                = 48
+	giant_h                = 64
+	giant_health_h         = 6
+	giant_health_w         = 36
 	giant_damage           = 2
 	shockwave_frame        = 9 // the frame at which the giant strikes the ground
 	slime_sm_w             = 4
@@ -108,7 +108,8 @@ var (
 	ambient_boss_snd     *audio.Player
 	collect_snd          *audio.Player
 	swing_miss_snd       *audio.Player
-	red                  = color.RGBA{R: 255, G: 0, B: 0, A: 100}
+	red                  = color.RGBA{R: 255, G: 0, B: 0, A: 255}
+	white                = color.RGBA{R: 255, G: 255, B: 255, A: 255}
 	see_thru_grey        = color.RGBA{R: 100, G: 100, B: 100, A: 170}
 	see_thru_red         = color.RGBA{R: 255, G: 0, B: 0, A: 50}
 	see_thru_black       = color.RGBA{R: 0, G: 0, B: 0, A: 150}
@@ -850,6 +851,10 @@ func (g *Game) Draw(screen *ebiten.Image) {
 				vector.FillCircle(screen, float32(x), float32(y), float32(shockwave_dist), see_thru_grey, false)
 			}
 		}
+		x, y = g.giant.x+6, g.giant.y
+		strokeRectangle(x, y, x+giant_health_w, y+giant_health_h, white, cam, screen)
+		width := giant_health_w * float64(g.giant.health) / float64(giant_start_health)
+		fillRectangle(x+1, y+1, x+width-2, y+giant_health_h-2, red, cam, screen)
 	}
 
 	curr_player := g.selves[len(g.selves)-1]
@@ -1231,9 +1236,17 @@ func drawHitbox(box *resolv.ConvexPolygon, cam *kamera.Camera, screen *ebiten.Im
 	drawLine(x+prev_vec.X, y+prev_vec.Y, x+vec.X, y+vec.Y, red, cam, screen)
 }
 
-// func drawRectangle(x float64, y float64, x2 float64, y2 float64, col color.RGBA, cam *kamera.Camera, screen *ebiten.Image) {
+func fillRectangle(x float64, y float64, x2 float64, y2 float64, col color.RGBA, cam *kamera.Camera, screen *ebiten.Image) {
+	x, y = cam.ApplyCameraTransformToPoint(x, y)
+	x2, y2 = cam.ApplyCameraTransformToPoint(x2, y2)
+	vector.FillRect(screen, float32(x), float32(y), float32(x2-x), float32(y2-y), col, false)
+}
 
-// }
+func strokeRectangle(x float64, y float64, x2 float64, y2 float64, col color.RGBA, cam *kamera.Camera, screen *ebiten.Image) {
+	x, y = cam.ApplyCameraTransformToPoint(x, y)
+	x2, y2 = cam.ApplyCameraTransformToPoint(x2, y2)
+	vector.StrokeRect(screen, float32(x), float32(y), float32(x2-x), float32(y2-y), 1, col, false)
+}
 
 func drawLine(x float64, y float64, x2 float64, y2 float64, col color.RGBA, cam *kamera.Camera, screen *ebiten.Image) {
 	x, y = cam.ApplyCameraTransformToPoint(x, y)
